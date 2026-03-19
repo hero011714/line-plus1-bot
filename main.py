@@ -119,6 +119,13 @@ def handle_message(event):
         add_count(user_id)
         return
 
+    # -1 扣減（不小於0）
+    if text == "-1":
+        count = get_count(user_id)
+        if count > 0:
+            cursor.execute("UPDATE users SET count = count - 1 WHERE user_id=?", (user_id,))
+            conn.commit()
+
     # 查帳
     elif text == "查帳":
         count = get_count(user_id)
