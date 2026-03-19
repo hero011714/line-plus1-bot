@@ -1,0 +1,33 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Deploy to Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          pip install render-api-client 2>/dev/null || pip install requests
+          curl -X POST https://api.render.com/v1/services \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "serviceId": "'${{ secrets.RENDER_SERVICE_ID }}'",
+              "clearCache": "yes"
+            }' 2>/dev/null || echo "Manual deploy needed"
