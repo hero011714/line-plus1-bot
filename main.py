@@ -114,15 +114,10 @@ def handle_message(event):
     
     add_user(user_id)
 
-    # +1 記錄
+    # +1 記錄（不回覆）
     if text == "+1":
         add_count(user_id)
-        count = get_count(user_id)
-        name = get_user_name(user_id)
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=f"@{name} 已記錄，目前 {count} 次，應繳 {count*price} 元", quick_reply=None)
-        )
+        return
 
     # 查帳
     elif text == "查帳":
