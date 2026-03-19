@@ -3,7 +3,7 @@ import sqlite3
 import asyncio
 from fastapi import FastAPI, Request
 from linebot import LineBotApi, WebhookHandler
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, Mention, Mentionee
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from linebot.exceptions import InvalidSignatureError
 
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET", "")
