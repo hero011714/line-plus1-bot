@@ -7,14 +7,18 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from linebot.exceptions import InvalidSignatureError
 
 # ===== 環境變數 =====
-CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
-CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
+CHANNEL_SECRET = os.getenv("CHANNEL_SECRET", "")
+CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN", "")
+ADMIN_ID = os.getenv("ADMIN_ID", "")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
 app = FastAPI()
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "LINE Bot is running"}
 
 # ===== 初始化資料庫 =====
 conn = sqlite3.connect("database.db", check_same_thread=False)
