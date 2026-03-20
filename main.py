@@ -145,8 +145,8 @@ def add_user(user_id, group_id, name=""):
             ON CONFLICT (user_id, group_id) 
             DO UPDATE SET name = EXCLUDED.name
         """, (user_id, group_id, name))
-    except Exception as e:
-        print(f"add_user error: {e}")
+    except:
+        pass
 
 def update_user_name(user_id, group_id, name):
     cur = get_cursor()
@@ -242,21 +242,18 @@ def add_count(user_id, group_id, n=1, name=""):
             ON CONFLICT (user_id, group_id) 
             DO UPDATE SET count = users.count + EXCLUDED.count
         """, (user_id, group_id, name, n))
-    except Exception as e:
-        print(f"add_count error: {e}")
+    except:
+        pass
 
 def get_count(user_id, group_id):
     cur = get_cursor()
     if not cur:
-        print(f"get_count: cursor is None, returning 0")
         return 0
     try:
         cur.execute("SELECT count FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
         result = cur.fetchone()
-        print(f"get_count: result={result}")
         return result[0] if result else 0
-    except Exception as e:
-        print(f"get_count error: {e}")
+    except:
         return 0
 
 def clear_user(user_id, group_id):
@@ -364,8 +361,7 @@ def handle_message(event):
             user_name = profile.display_name
             add_user(user_id, group_id, user_name)
             update_user_name(user_id, group_id, user_name)
-        except Exception as e:
-            print(f"Profile fetch error: {e}")
+        except:
             add_user(user_id, group_id, user_name)
     else:
         add_user(user_id, group_id, user_name)
@@ -624,10 +620,13 @@ def handle_message(event):
                 n = 1
             else:
                 n = int(text.lstrip("-"))
-            count = get_count(user_id, group_id)
-            new_count = max(0, count - n)
             cur = get_cursor()
             if cur:
-                cur.execute("UPDATE users SET count=%s WHERE user_id=%s AND group_id=%s", (new_count, user_id, group_id))
+                cur.execute("""
+                    INSERT INTO users (user_id, group_id, count, last_fetch)
+                    VALUES (%s, %s, 0, 0)
+                    ON CONFLICT (user_id, group_id) 
+                    DO UPDATE SET count = GREATEST(users.count - %s, 0)
+                """, (user_id, group_id, n))
         except:
             pass
