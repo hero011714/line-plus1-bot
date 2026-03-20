@@ -82,7 +82,8 @@ def init_tables():
             CREATE TABLE IF NOT EXISTS events (
                 group_id TEXT PRIMARY KEY,
                 started_at INTEGER DEFAULT 0,
-                expires_at INTEGER DEFAULT 0
+                expires_at INTEGER DEFAULT 0,
+                total_count INTEGER DEFAULT 0
             )
         """)
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
@@ -376,13 +377,35 @@ def start_event(group_id):
         now = int(time.time())
         expires = now + 48 * 3600
         cur.execute("""
-            INSERT INTO events (group_id, started_at, expires_at)
-            VALUES (%s, %s, %s)
+            INSERT INTO events (group_id, started_at, expires_at, total_count)
+            VALUES (%s, %s, %s, 1)
             ON CONFLICT (group_id)
-            DO UPDATE SET started_at = EXCLUDED.started_at, expires_at = EXCLUDED.expires_at
+            DO UPDATE SET started_at = EXCLUDED.started_at, expires_at = EXCLUDED.expires_at, total_count = EXCLUDED.total_count
         """, (group_id, now, expires))
     except:
         pass
+
+def add_total_count(group_id, n):
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("""
+            UPDATE events SET total_count = total_count + %s WHERE group_id = %s
+        """, (n, group_id))
+    except:
+        pass
+
+def get_total_count(group_id):
+    cur = get_cursor()
+    if not cur:
+        return 0
+    try:
+        cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
+        result = cur.fetchone()
+        return result[0] if result else 0
+    except:
+        return 0
 
 def clear_signups(group_id):
     cur = get_cursor()
@@ -745,7 +768,8 @@ def handle_message(event):
                         return
                     
                     add_count(target_user_id, group_id, n)
-                    new_count = get_count(target_user_id, group_id)
+                    add_total_count(group_id, n)
+                    new_count = get_total_count(group_id)
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
                     return
 
@@ -758,7 +782,7 @@ def handle_message(event):
             start_event(group_id)
             signup(user_id, group_id, user_name)
             add_count(user_id, group_id, 1, user_name)
-            count = get_signup_count(group_id)
+            count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
             return
 
@@ -774,7 +798,8 @@ def handle_message(event):
                 return
             signup(user_id, group_id, user_name)
             add_count(user_id, group_id, 1, user_name)
-            count = get_signup_count(group_id)
+            add_total_count(group_id, 1)
+            count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         else:
             if text == "+" or text == "++":
@@ -790,7 +815,8 @@ def handle_message(event):
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
                     return
                 add_count(user_id, group_id, n, user_name)
-            count = get_signup_count(group_id)
+                add_total_count(group_id, n)
+            count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
 
@@ -811,9 +837,10 @@ def handle_message(event):
                     ON CONFLICT (user_id, group_id) 
                     DO UPDATE SET count = GREATEST(users.count - %s, 0)
                 """, (user_id, group_id, n))
-            count = get_signup_count(group_id)
+                add_total_count(group_id, -n)
+            count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         except Exception as e:
             print(f"Minus error: {e}")
-            count = get_signup_count(group_id)
+            count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
