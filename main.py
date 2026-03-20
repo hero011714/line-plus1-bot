@@ -175,23 +175,6 @@ def handle_message(event):
             cursor.execute("UPDATE users SET count = count - 1 WHERE user_id=?", (user_id,))
             conn.commit()
 
-    # 設定名字（所有人可用）
-    elif text.startswith("設定名字 "):
-        new_name = text.replace("設定名字", "").strip()
-        if new_name:
-            cursor.execute("UPDATE users SET name=? WHERE user_id=?", (new_name, user_id))
-            conn.commit()
-            user_name = new_name
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=f"已將你的名字設定為 @{new_name}")
-            )
-        else:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="請輸入：設定名字 [你的名字]")
-            )
-
     # 查帳
     elif text == "查帳":
         count = get_count(user_id)
@@ -327,8 +310,8 @@ def handle_message(event):
                 TextSendMessage(text="請使用「已繳 @人」格式")
             )
 
-    # 全部帳單
-    elif text == "全部帳單":
+    # 全部帳單（管理員）
+    elif text == "全部帳單" and user_id == ADMIN_ID:
         rows = get_all_users()
         whitelist_ids = [u[0] for u in get_whitelist()]
         msg = "📋 全部帳單：\n"
