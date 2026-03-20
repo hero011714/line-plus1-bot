@@ -2,11 +2,12 @@ services:
   - type: web
     name: line-plus1-bot
     env: python
-    region: singapore
+    region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
+    repo: https://github.com/hero011714/line-plus1-bot
     envVars:
       - key: CHANNEL_SECRET
         sync: false
