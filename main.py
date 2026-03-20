@@ -29,7 +29,7 @@ def init_db():
         print("WARNING: DATABASE_URL not set!")
         return False
     try:
-        db_pool = pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+        db_pool = pool.ThreadedConnectionPool(1, 10, DATABASE_URL, sslmode='require')
         conn = db_pool.getconn()
         cursor = conn.cursor()
         cursor.execute("""
