@@ -436,18 +436,28 @@ def is_signed_up(user_id, group_id):
     except:
         return False
 
-def signup(user_id, group_id, name=""):
+def atomic_signup(user_id, group_id, name=""):
     cur = get_cursor()
     if not cur:
         return False
     try:
-        now = int(time.time())
+        cur.execute("SELECT expires_at FROM events WHERE group_id=%s FOR UPDATE", (group_id,))
+        result = cur.fetchone()
+        if not result or result[0] <= int(time.time()):
+            return False
+        cur.execute("SELECT COUNT(*) FROM signups WHERE group_id=%s", (group_id,))
+        count = cur.fetchone()[0]
+        cur.execute("SELECT value FROM config WHERE group_id='default' AND key='signup_limit'")
+        limit_res = cur.fetchone()
+        limit = int(limit_res[0]) if limit_res else 12
+        if count >= limit:
+            return False
         cur.execute("""
             INSERT INTO signups (user_id, group_id, name, signup_time)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (user_id, group_id)
             DO UPDATE SET name = EXCLUDED.name
-        """, (user_id, group_id, name, now))
+        """, (user_id, group_id, name, int(time.time())))
         return True
     except:
         return False
@@ -779,7 +789,7 @@ def handle_message(event):
                 return
             clear_signups(group_id)
             start_event(group_id)
-            signup(user_id, group_id, user_name)
+            atomic_signup(user_id, group_id, user_name)
             add_count(user_id, group_id, 1, user_name)
             count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
@@ -790,12 +800,12 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
         if not is_signed_up(user_id, group_id):
-            current = get_signup_count(group_id)
-            limit = get_signup_limit(group_id)
-            if current >= limit:
+            signed_up = atomic_signup(user_id, group_id, user_name)
+            if not signed_up:
+                current = get_signup_count(group_id)
+                limit = get_signup_limit(group_id)
                 line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 報名人數已滿（{current}/{limit}）"))
                 return
-            signup(user_id, group_id, user_name)
             add_count(user_id, group_id, 1, user_name)
             add_total_count(group_id, 1)
             count = get_total_count(group_id)
