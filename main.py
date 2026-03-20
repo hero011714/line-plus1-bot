@@ -3,6 +3,7 @@ import psycopg2
 from psycopg2 import pool
 import asyncio
 import time
+import psutil
 from fastapi import FastAPI, Request
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -93,6 +94,18 @@ def get_group_id(event):
         return event.source.room_id
     else:
         return 'private_' + event.source.user_id
+
+def clear_group_data(group_id):
+    global cursor, conn
+    if not cursor:
+        return
+    try:
+        cursor.execute("DELETE FROM whitelist WHERE group_id=%s", (group_id,))
+        cursor.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
+        cursor.execute("DELETE FROM config WHERE group_id=%s", (group_id,))
+        conn.commit()
+    except:
+        pass
 
 def get_price(group_id):
     global cursor
@@ -285,6 +298,19 @@ def get_user_by_name(name, group_id):
     except:
         return None
 
+def get_group_stats(group_id):
+    global cursor
+    if not cursor:
+        return 0, 0
+    try:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE group_id=%s", (group_id,))
+        user_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM whitelist WHERE group_id=%s", (group_id,))
+        whitelist_count = cursor.fetchone()[0]
+        return user_count, whitelist_count
+    except:
+        return 0, 0
+
 def get_mentioned_users(event, exclude_id=None):
     mentioned = []
     group_id = get_group_id(event)
@@ -332,6 +358,7 @@ def handle_message(event):
     price = get_price(group_id)
     user_name = get_user_name(user_id, group_id)
     reply_token = event.reply_token
+    source_type = event.source.type
     
     if should_fetch_profile(user_id, group_id):
         try:
@@ -371,7 +398,9 @@ def handle_message(event):
         msg += "已繳 @人：清除帳目\n"
         msg += "@人 +N：替他人記錄（管理員）\n"
         msg += "重置全部：清除所有人帳目\n"
-        msg += "全部帳單：查看所有人的欠款\n\n"
+        msg += "全部帳單：查看所有人的欠款\n"
+        msg += "退出群組：清除資料並退出\n"
+        msg += "狀態：查看系統狀態\n\n"
         msg += "【特殊指令】\n"
         msg += "群組ID：查看目前群組ID"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
@@ -379,6 +408,45 @@ def handle_message(event):
 
     if text == "群組ID":
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"📌 目前群組ID：\n{group_id}"))
+        return
+
+    if text == "狀態" and user_id == ADMIN_ID:
+        try:
+            memory = psutil.virtual_memory()
+            memory_used = memory.used / (1024 * 1024)
+            memory_total = memory.total / (1024 * 1024)
+            memory_percent = memory.percent
+            
+            user_count, whitelist_count = get_group_stats(group_id)
+            
+            msg = "📊 系統狀態：\n\n"
+            msg += f"💾 記憶體使用：\n"
+            msg += f"   已使用：{memory_used:.1f} MB\n"
+            msg += f"   總計：{memory_total:.1f} MB\n"
+            msg += f"   使用率：{memory_percent:.1f}%\n\n"
+            msg += f"👥 目前群組：\n"
+            msg += f"   登記用戶：{user_count} 人\n"
+            msg += f"   白名單：{whitelist_count} 人\n"
+            msg += f"   目前單價：{price} 元"
+            
+            if memory_percent > 80:
+                msg += "\n\n⚠️ 警告：記憶體使用率過高！"
+        except Exception as e:
+            msg = f"❌ 無法取得狀態：{e}"
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
+    if text == "退出群組" and user_id == ADMIN_ID and source_type in ['group', 'room']:
+        try:
+            clear_group_data(group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="👋 已清除所有資料，即將退出群組..."))
+            time.sleep(1)
+            if source_type == 'group':
+                line_bot_api.leave_group(group_id)
+            else:
+                line_bot_api.leave_room(group_id)
+        except Exception as e:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ 退出失敗：{e}"))
         return
 
     if text.startswith("設定單價") and user_id == ADMIN_ID:
