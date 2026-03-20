@@ -105,12 +105,12 @@ def handle_message(event):
     text = event.message.text.strip()
     price = get_price()
     
-    # 取得用戶名稱並儲存
+    # 取得用戶名稱並儲存（群組中可能失敗，跳過）
     try:
         profile = line_bot_api.get_profile(user_id)
         update_user_name(user_id, profile.display_name)
-    except:
-        pass
+    except Exception as e:
+        print(f"Profile fetch error (may be group): {e}")
     
     add_user(user_id)
 
