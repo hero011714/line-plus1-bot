@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT
 )
 """)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS whitelist (
+    user_id TEXT PRIMARY KEY,
+    name TEXT DEFAULT ''
+)
+""")
 cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('price', '50')")
 conn.commit()
 
@@ -60,6 +66,22 @@ def get_user_name(user_id):
     cursor.execute("SELECT name FROM users WHERE user_id=?", (user_id,))
     result = cursor.fetchone()
     return result[0] if result and result[0] else user_id[-4:]
+
+def is_whitelist(user_id):
+    cursor.execute("SELECT 1 FROM whitelist WHERE user_id=?", (user_id,))
+    return cursor.fetchone() is not None
+
+def add_to_whitelist(user_id, name=""):
+    cursor.execute("INSERT OR REPLACE INTO whitelist (user_id, name) VALUES (?, ?)", (user_id, name))
+    conn.commit()
+
+def remove_from_whitelist(user_id):
+    cursor.execute("DELETE FROM whitelist WHERE user_id=?", (user_id,))
+    conn.commit()
+
+def get_whitelist():
+    cursor.execute("SELECT user_id, name FROM whitelist")
+    return cursor.fetchall()
 
 def add_count(user_id):
     cursor.execute("UPDATE users SET count = count + 1 WHERE user_id=?", (user_id,))
@@ -104,15 +126,21 @@ def handle_message(event):
     user_id = event.source.user_id
     text = event.message.text.strip()
     price = get_price()
+    user_name = get_user_name(user_id)
     
-    # 取得用戶名稱並儲存（群組中可能失敗，跳過）
+    # 取得用戶名稱並儲存
     try:
         profile = line_bot_api.get_profile(user_id)
-        update_user_name(user_id, profile.display_name)
+        user_name = profile.display_name
+        update_user_name(user_id, user_name)
     except Exception as e:
-        print(f"Profile fetch error (may be group): {e}")
+        print(f"Profile fetch error: {e}")
     
-    add_user(user_id)
+    add_user(user_id, user_name)
+
+    # 白名單用戶不打 +1
+    if is_whitelist(user_id):
+        return
 
     # +1 記錄（不回覆）
     if text == "+1":
@@ -129,10 +157,9 @@ def handle_message(event):
     # 查帳
     elif text == "查帳":
         count = get_count(user_id)
-        name = get_user_name(user_id)
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=f"@{name} 目前 {count} 次，應繳 {count*price} 元")
+            TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元")
         )
 
     # 設定單價（管理員）
@@ -150,9 +177,8 @@ def handle_message(event):
                 TextSendMessage(text="格式錯誤，請輸入：設定單價 數字")
             )
 
-    # 已繳 - 支援 @人 格式
-    elif text.startswith("已繳") and user_id == ADMIN_ID:
-        # 檢查是否有 mention
+    # 加入白名單（管理員）
+    elif text.startswith("白名單加入") and user_id == ADMIN_ID:
         mention = getattr(event.message, 'mention', None)
         target_name = None
         target_user_id = None
@@ -168,7 +194,80 @@ def handle_message(event):
                         target_name = get_user_name(target_user_id)
                     break
         
-        # 如果沒有 mention，嘗試用名稱查詢
+        if not target_user_id:
+            parts = text.replace("白名單加入", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts)
+                target_name = parts
+        
+        if target_user_id:
+            add_to_whitelist(target_user_id, target_name or "")
+            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"已將 {name_display} 加入白名單")
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請使用「白名單加入 @人」格式")
+            )
+
+    # 移除白名單（管理員）
+    elif text.startswith("白名單移除") and user_id == ADMIN_ID:
+        parts = text.replace("白名單移除", "").strip()
+        if parts.startswith("@"):
+            parts = parts[1:]
+        
+        target_user_id = None
+        if parts:
+            target_user_id = get_user_by_name(parts)
+        
+        if target_user_id:
+            remove_from_whitelist(target_user_id)
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"已將 @{parts} 移出白名單")
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請使用「白名單移除 @人」格式")
+            )
+
+    # 查看白名單（管理員）
+    elif text == "白名單" and user_id == ADMIN_ID:
+        rows = get_whitelist()
+        if rows:
+            msg = "📋 白名單：\n"
+            for uid, name in rows:
+                msg += f"✅ @{name}\n"
+        else:
+            msg = "白名單是空的"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=msg)
+        )
+
+    # 已繳 - 支援 @人 格式
+    elif text.startswith("已繳") and user_id == ADMIN_ID:
+        mention = getattr(event.message, 'mention', None)
+        target_name = None
+        target_user_id = None
+        
+        if mention and hasattr(mention, 'mentionees'):
+            for m in mention.mentionees:
+                if m.user_id != ADMIN_ID:
+                    target_user_id = m.user_id
+                    try:
+                        profile = line_bot_api.get_profile(target_user_id)
+                        target_name = profile.display_name
+                    except:
+                        target_name = get_user_name(target_user_id)
+                    break
+        
         if not target_user_id:
             parts = text.replace("已繳", "").strip()
             if parts.startswith("@"):
@@ -187,15 +286,18 @@ def handle_message(event):
         else:
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="請使用「已繳 @人」格式（需要 mention）")
+                TextSendMessage(text="請使用「已繳 @人」格式")
             )
 
     # 全部帳單
     elif text == "全部帳單":
         rows = get_all_users()
+        whitelist_ids = [u[0] for u in get_whitelist()]
         msg = "📋 全部帳單：\n"
         has_debt = False
         for uid, name, count in rows:
+            if uid in whitelist_ids:
+                continue
             if count > 0:
                 display_name = f"@{name}" if name else uid[-4:]
                 msg += f"{display_name}: {count}次 / {count*price}元\n"
