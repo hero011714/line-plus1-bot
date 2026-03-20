@@ -142,6 +142,21 @@ def handle_message(event):
     except Exception as e:
         print(f"Profile fetch error: {e}")
     
+    # 如果有 @mention，同時學習被提及者的名字
+    try:
+        mention = getattr(event.message, 'mention', None)
+        if mention and hasattr(mention, 'mentionees'):
+            for m in mention.mentionees:
+                if m.user_id and m.user_id != user_id:
+                    try:
+                        target_profile = line_bot_api.get_profile(m.user_id)
+                        update_user_name(m.user_id, target_profile.display_name)
+                        add_user(m.user_id, target_profile.display_name)
+                    except:
+                        pass
+    except:
+        pass
+    
     add_user(user_id, user_name)
 
     # 白名單用戶不打 +1
