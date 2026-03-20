@@ -148,10 +148,15 @@ def add_user(user_id, group_id, name=""):
     if not cursor:
         return
     try:
-        cursor.execute("INSERT INTO users (user_id, group_id, name, count, last_fetch) VALUES (%s, %s, %s, 0, 0) ON CONFLICT (user_id, group_id) DO NOTHING", (user_id, group_id, name))
-        if name:
-            cursor.execute("UPDATE users SET name=%s WHERE user_id=%s AND group_id=%s", (name, user_id, group_id))
-    except:
+        cursor.execute("""
+            INSERT INTO users (user_id, group_id, name, count, last_fetch)
+            VALUES (%s, %s, %s, 0, 0)
+            ON CONFLICT (user_id, group_id) 
+            DO UPDATE SET name = EXCLUDED.name
+        """, (user_id, group_id, name))
+        conn.commit()
+    except Exception as e:
+        print(f"add_user error: {e}")
         pass
 
 def update_user_name(user_id, group_id, name):
@@ -239,12 +244,17 @@ def get_whitelist(group_id):
     except:
         return []
 
-def add_count(user_id, group_id, n=1):
+def add_count(user_id, group_id, n=1, name=""):
     global cursor, conn
     if not cursor:
         return
     try:
-        cursor.execute("INSERT INTO users (user_id, group_id, count, last_fetch) VALUES (%s, %s, %s, 0) ON CONFLICT (user_id, group_id) DO UPDATE SET count = users.count + %s", (user_id, group_id, n, n))
+        cursor.execute("""
+            INSERT INTO users (user_id, group_id, name, count, last_fetch)
+            VALUES (%s, %s, %s, %s, 0)
+            ON CONFLICT (user_id, group_id) 
+            DO UPDATE SET count = users.count + EXCLUDED.count
+        """, (user_id, group_id, name, n))
         conn.commit()
     except Exception as e:
         print(f"add_count error: {e}")
