@@ -163,17 +163,32 @@ def handle_message(event):
     if is_whitelist(user_id):
         return
 
-    # +1 記錄（不回覆）
-    if text == "+1":
-        add_count(user_id)
+    # + 加次數（++ = +1, +2 = +2, ...）
+    if text.startswith("+"):
+        if text == "+" or text == "++":
+            add_count(user_id)
+        else:
+            try:
+                n = int(text.lstrip("+"))
+                for _ in range(n):
+                    add_count(user_id)
+            except:
+                pass
         return
 
-    # -1 扣減（不小於0）
-    if text == "-1":
-        count = get_count(user_id)
-        if count > 0:
-            cursor.execute("UPDATE users SET count = count - 1 WHERE user_id=?", (user_id,))
+    # - 扣次數（-- = -1, -2 = -2, ...不小於0）
+    if text.startswith("-"):
+        try:
+            if text == "-" or text == "--":
+                n = 1
+            else:
+                n = int(text.lstrip("-"))
+            count = get_count(user_id)
+            new_count = max(0, count - n)
+            cursor.execute("UPDATE users SET count=? WHERE user_id=?", (new_count, user_id))
             conn.commit()
+        except:
+            pass
 
     # 查帳
     elif text == "查帳":
