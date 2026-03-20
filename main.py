@@ -764,7 +764,7 @@ def handle_message(event):
 
     if text.startswith("+"):
         if not is_event_active(group_id):
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="請教練先「打球+1」開團"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
         if not is_signed_up(user_id, group_id):
             current = get_signup_count(group_id)
