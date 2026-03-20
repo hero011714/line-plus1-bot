@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import asyncio
+import time
 from fastapi import FastAPI, Request
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -17,15 +18,19 @@ app = FastAPI()
 
 @app.get("/")
 def root():
+    commit_all()
     return {"status": "ok", "message": "LINE Bot is running"}
 
 conn = sqlite3.connect("database.db", check_same_thread=False)
+conn.execute("PRAGMA journal_mode=WAL")
 cursor = conn.cursor()
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     name TEXT DEFAULT '',
-    count INTEGER DEFAULT 0
+    count INTEGER DEFAULT 0,
+    last_fetch INTEGER DEFAULT 0
 )
 """)
 cursor.execute("""
@@ -42,7 +47,22 @@ CREATE TABLE IF NOT EXISTS whitelist (
 """)
 cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('price', '50')")
 cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('max_per_action', '10')")
+cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('fetch_interval', '86400')")
 conn.commit()
+
+_pending_updates = []
+
+def queue_update(sql, params=()):
+    _pending_updates.append((sql, params))
+
+def commit_all():
+    global _pending_updates
+    if _pending_updates:
+        cursor.executemany("UPDATE users SET " + _pending_updates[0][0], [p for _, p in _pending_updates])
+        for sql, params in _pending_updates:
+            cursor.execute(sql, params)
+        conn.commit()
+        _pending_updates = []
 
 def get_price():
     cursor.execute("SELECT value FROM config WHERE key='price'")
@@ -52,20 +72,29 @@ def get_max_per_action():
     cursor.execute("SELECT value FROM config WHERE key='max_per_action'")
     return int(cursor.fetchone()[0])
 
+def get_fetch_interval():
+    cursor.execute("SELECT value FROM config WHERE key='fetch_interval'")
+    return int(cursor.fetchone()[0])
+
 def set_price(price):
     cursor.execute("UPDATE config SET value=? WHERE key='price'", (str(price),))
     conn.commit()
 
 def add_user(user_id, name=""):
-    cursor.execute("INSERT OR IGNORE INTO users (user_id, name) VALUES (?, ?)", (user_id, name))
-    conn.commit()
+    cursor.execute("INSERT OR IGNORE INTO users (user_id, name) VALUES (?, ?, 0, 0)", (user_id, name))
     if name:
         cursor.execute("UPDATE users SET name=? WHERE user_id=?", (name, user_id))
-        conn.commit()
 
 def update_user_name(user_id, name):
-    cursor.execute("UPDATE users SET name=? WHERE user_id=?", (name, user_id))
-    conn.commit()
+    cursor.execute("UPDATE users SET name=?, last_fetch=? WHERE user_id=?", (name, int(time.time()), user_id))
+
+def should_fetch_profile(user_id):
+    cursor.execute("SELECT last_fetch FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    if not result or result[0] == 0:
+        return True
+    interval = get_fetch_interval()
+    return (int(time.time()) - result[0]) > interval
 
 def get_user_name(user_id):
     cursor.execute("SELECT name FROM users WHERE user_id=?", (user_id,))
@@ -98,9 +127,7 @@ def get_whitelist():
     return cursor.fetchall()
 
 def add_count(user_id, n=1):
-    for _ in range(n):
-        cursor.execute("UPDATE users SET count = count + 1 WHERE user_id=?", (user_id,))
-    conn.commit()
+    cursor.execute("UPDATE users SET count = count + ? WHERE user_id=?", (n, user_id))
 
 def get_count(user_id):
     cursor.execute("SELECT count FROM users WHERE user_id=?", (user_id,))
@@ -109,11 +136,9 @@ def get_count(user_id):
 
 def clear_user(user_id):
     cursor.execute("UPDATE users SET count=0 WHERE user_id=?", (user_id,))
-    conn.commit()
 
 def clear_all_users():
     cursor.execute("UPDATE users SET count=0")
-    conn.commit()
 
 def get_all_users():
     cursor.execute("SELECT user_id, name, count FROM users")
@@ -132,11 +157,15 @@ def get_mentioned_users(event, exclude_id=None):
             if m.user_id and m.user_id != exclude_id:
                 name = get_user_name(m.user_id)
                 try:
-                    profile = line_bot_api.get_profile(m.user_id)
-                    name = profile.display_name
-                    update_user_name(m.user_id, name)
+                    if should_fetch_profile(m.user_id):
+                        profile = line_bot_api.get_profile(m.user_id)
+                        name = profile.display_name
+                        add_user(m.user_id, name)
+                        update_user_name(m.user_id, name)
+                    else:
+                        add_user(m.user_id, name)
                 except:
-                    pass
+                    add_user(m.user_id, name)
                 mentioned.append((m.user_id, name))
     return mentioned
 
@@ -153,6 +182,8 @@ async def callback(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return "Error"
+    finally:
+        commit_all()
 
     return "OK"
 
@@ -164,22 +195,25 @@ def handle_message(event):
     user_name = get_user_name(user_id)
     reply_token = event.reply_token
     
-    # 取得用戶名稱並儲存
-    try:
-        profile = line_bot_api.get_profile(user_id)
-        user_name = profile.display_name
-        update_user_name(user_id, user_name)
-    except Exception as e:
-        print(f"Profile fetch error: {e}")
+    # 只在需要時取得用戶名稱（快取 24 小時）
+    if should_fetch_profile(user_id):
+        try:
+            profile = line_bot_api.get_profile(user_id)
+            user_name = profile.display_name
+            add_user(user_id, user_name)
+            update_user_name(user_id, user_name)
+        except Exception as e:
+            print(f"Profile fetch error: {e}")
+            add_user(user_id, user_name)
+    else:
+        add_user(user_id, user_name)
     
     # 學習被提及者的名字
     try:
         for m_user_id, m_name in get_mentioned_users(event, user_id):
-            add_user(m_user_id, m_name)
+            pass
     except:
         pass
-    
-    add_user(user_id, user_name)
 
     # 白名單用戶不打 +1
     if is_whitelist(user_id):
@@ -219,6 +253,7 @@ def handle_message(event):
     # 重置全部（管理員）
     if text == "重置全部" and user_id == ADMIN_ID:
         clear_all_users()
+        conn.commit()
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除所有人的帳目"))
         return
 
@@ -263,13 +298,11 @@ def handle_message(event):
         target_user_id = None
         target_name = None
         
-        # 先找 mention
         for m_user_id, m_name in get_mentioned_users(event, ADMIN_ID):
             target_user_id = m_user_id
             target_name = m_name
             break
         
-        # 如果沒有 mention，用文字找
         if not target_user_id:
             parts = text.replace("白名單加入", "").strip()
             if parts.startswith("@"):
@@ -327,6 +360,7 @@ def handle_message(event):
         if target_user_id:
             old_count = get_count(target_user_id)
             clear_user(target_user_id)
+            conn.commit()
             name_display = f"@{target_name}" if target_name else target_user_id[-4:]
             msg = f"✅ 已清除 {name_display} 的帳目"
             if old_count > 0:
@@ -336,16 +370,14 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
         return
 
-    # @人 +N（管理員）- 替他人記錄
+    # @人 +N（管理員）
     if text.startswith("@") and user_id == ADMIN_ID:
-        # 解析 @人 +N 格式
         parts = text.split()
         if len(parts) >= 2:
             target_name = parts[0].replace("@", "")
             target_user_id = get_user_by_name(target_name)
             
             if target_user_id and len(parts) >= 2:
-                # 取得數量
                 count_text = parts[1]
                 if count_text in ["+", "++"]:
                     n = 1
@@ -363,14 +395,15 @@ def handle_message(event):
                         return
                     
                     add_count(target_user_id, n)
+                    conn.commit()
                     new_count = get_count(target_user_id)
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已替 @{target_name} 記錄 +{n} 次（共 {new_count} 次，應繳 {new_count*price} 元）"))
                     return
 
-    # + 加次數（++ = +1, +2 = +2, ...上限 10）
+    # + 加次數
     if text.startswith("+"):
         if text == "+" or text == "++":
-            add_count(user_id)
+            add_count(user_id, 1)
         else:
             try:
                 n = int(text.lstrip("+"))
@@ -383,7 +416,7 @@ def handle_message(event):
                 pass
         return
 
-    # - 扣次數（-- = -1, -2 = -2, ...不小於0）
+    # - 扣次數
     if text.startswith("-"):
         try:
             if text == "-" or text == "--":
@@ -393,6 +426,5 @@ def handle_message(event):
             count = get_count(user_id)
             new_count = max(0, count - n)
             cursor.execute("UPDATE users SET count=? WHERE user_id=?", (new_count, user_id))
-            conn.commit()
         except:
             pass
