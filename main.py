@@ -291,7 +291,11 @@ def get_user_by_name(name, group_id):
     try:
         cur.execute("SELECT user_id FROM users WHERE name=%s AND group_id=%s", (name, group_id))
         result = cur.fetchone()
-        return result[0] if result else None
+        if result:
+            return result[0]
+        cur.execute("SELECT user_id FROM whitelist WHERE name=%s AND group_id=%s", (name, group_id))
+        result2 = cur.fetchone()
+        return result2[0] if result2 else None
     except:
         return None
 
