@@ -412,25 +412,25 @@ def handle_message(event):
 
     if text == "狀態" and user_id == ADMIN_ID:
         try:
-            memory = psutil.virtual_memory()
-            memory_used = memory.used / (1024 * 1024)
-            memory_total = memory.total / (1024 * 1024)
-            memory_percent = memory.percent
+            disk = psutil.disk_usage('/')
+            disk_used = disk.used / (1024 * 1024 * 1024)
+            disk_total = disk.total / (1024 * 1024 * 1024)
+            disk_percent = disk.percent
             
             user_count, whitelist_count = get_group_stats(group_id)
             
             msg = "📊 系統狀態：\n\n"
-            msg += f"💾 記憶體使用：\n"
-            msg += f"   已使用：{memory_used:.1f} MB\n"
-            msg += f"   總計：{memory_total:.1f} MB\n"
-            msg += f"   使用率：{memory_percent:.1f}%\n\n"
+            msg += f"💾 硬碟使用：\n"
+            msg += f"   已使用：{disk_used:.2f} GB\n"
+            msg += f"   總計：{disk_total:.2f} GB\n"
+            msg += f"   使用率：{disk_percent:.1f}%\n\n"
             msg += f"👥 目前群組：\n"
             msg += f"   登記用戶：{user_count} 人\n"
             msg += f"   白名單：{whitelist_count} 人\n"
             msg += f"   目前單價：{price} 元"
             
-            if memory_percent > 80:
-                msg += "\n\n⚠️ 警告：記憶體使用率過高！"
+            if disk_percent > 80:
+                msg += "\n\n⚠️ 警告：硬碟使用率過高！"
         except Exception as e:
             msg = f"❌ 無法取得狀態：{e}"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
