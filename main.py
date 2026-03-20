@@ -636,7 +636,8 @@ def handle_message(event):
                     ON CONFLICT (user_id, group_id) 
                     DO UPDATE SET count = GREATEST(users.count - %s, 0)
                 """, (user_id, group_id, n))
-                count = get_count(user_id, group_id)
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {count} 次"))
-        except:
-            pass
+            count = get_count(user_id, group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {count} 次"))
+        except Exception as e:
+            print(f"Minus error: {e}")
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {get_count(user_id, group_id)} 次"))
