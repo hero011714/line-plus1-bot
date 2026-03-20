@@ -65,7 +65,13 @@ def update_user_name(user_id, name):
 def get_user_name(user_id):
     cursor.execute("SELECT name FROM users WHERE user_id=?", (user_id,))
     result = cursor.fetchone()
-    return result[0] if result and result[0] else user_id[-4:]
+    if result and result[0]:
+        return result[0]
+    cursor.execute("SELECT name FROM whitelist WHERE user_id=?", (user_id,))
+    result2 = cursor.fetchone()
+    if result2 and result2[0]:
+        return result2[0]
+    return user_id[-4:]
 
 def is_whitelist(user_id):
     cursor.execute("SELECT 1 FROM whitelist WHERE user_id=?", (user_id,))
@@ -153,6 +159,23 @@ def handle_message(event):
         if count > 0:
             cursor.execute("UPDATE users SET count = count - 1 WHERE user_id=?", (user_id,))
             conn.commit()
+
+    # 設定名字（所有人可用）
+    elif text.startswith("設定名字 "):
+        new_name = text.replace("設定名字", "").strip()
+        if new_name:
+            cursor.execute("UPDATE users SET name=? WHERE user_id=?", (new_name, user_id))
+            conn.commit()
+            user_name = new_name
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"已將你的名字設定為 @{new_name}")
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請輸入：設定名字 [你的名字]")
+            )
 
     # 查帳
     elif text == "查帳":
