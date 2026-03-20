@@ -69,9 +69,20 @@ def init_tables():
                 PRIMARY KEY (user_id, group_id)
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS signups (
+                user_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                signup_time INTEGER DEFAULT 0,
+                expires_at INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, group_id)
+            )
+        """)
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', '12') ON CONFLICT DO NOTHING")
         print("Tables initialized successfully")
         return True
     except Exception as e:
@@ -96,6 +107,7 @@ def clear_group_data(group_id):
     try:
         cur.execute("DELETE FROM whitelist WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM config WHERE group_id=%s", (group_id,))
     except:
         pass
@@ -312,6 +324,56 @@ def get_group_stats(group_id):
     except:
         return 0, 0
 
+def get_signup_limit(group_id):
+    cur = get_cursor()
+    if not cur:
+        return 12
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id='default' AND key='signup_limit'")
+        result = cur.fetchone()
+        return int(result[0]) if result else 12
+    except:
+        return 12
+
+def get_signup_count(group_id):
+    cur = get_cursor()
+    if not cur:
+        return 0
+    try:
+        now = int(time.time())
+        cur.execute("SELECT COUNT(*) FROM signups WHERE group_id=%s AND expires_at > %s", (group_id, now))
+        return cur.fetchone()[0]
+    except:
+        return 0
+
+def is_signed_up(user_id, group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        now = int(time.time())
+        cur.execute("SELECT 1 FROM signups WHERE user_id=%s AND group_id=%s AND expires_at > %s", (user_id, group_id, now))
+        return cur.fetchone() is not None
+    except:
+        return False
+
+def signup(user_id, group_id, name=""):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        now = int(time.time())
+        expires = now + 48 * 3600
+        cur.execute("""
+            INSERT INTO signups (user_id, group_id, name, signup_time, expires_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, group_id)
+            DO UPDATE SET signup_time = EXCLUDED.signup_time, expires_at = EXCLUDED.expires_at, name = EXCLUDED.name
+        """, (user_id, group_id, name, now, expires))
+        return True
+    except:
+        return False
+
 def get_mentioned_users(event, exclude_id=None):
     mentioned = []
     group_id = get_group_id(event)
@@ -382,6 +444,8 @@ def handle_message(event):
 
     if text in ["幫助", "help"]:
         msg = "📋 記帳機器人指令：\n\n"
+        msg += "【報到】\n"
+        msg += "今天打球+1 / 明天打球+1：報到（需先報到才能使用 +/-）\n\n"
         msg += "【一般指令】\n"
         msg += "+ 或 ++：+1 次\n"
         msg += "+N：+N 次（上限 10）\n"
@@ -390,6 +454,7 @@ def handle_message(event):
         msg += "查帳：查看自己的帳目\n\n"
         msg += "【管理員指令】\n"
         msg += "設定單價 [數字]\n"
+        msg += "設定報名人數上限 [數字]\n"
         msg += "白名單加入 @人\n"
         msg += "白名單移除 @人\n"
         msg += "白名單：查看白名單\n"
@@ -429,6 +494,7 @@ def handle_message(event):
             
             msg += f"👥 目前群組：\n"
             msg += f"   登記用戶：{user_count} 人\n"
+            msg += f"   報名人數：{get_signup_count(group_id)} / {get_signup_limit(group_id)} 人\n"
             msg += f"   白名單：{whitelist_count} 人\n"
             msg += f"   目前單價：{price} 元"
             
@@ -459,6 +525,17 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 單價已設定為 {new_price} 元"))
         except:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：設定單價 數字"))
+        return
+
+    if text.startswith("設定報名人數上限") and user_id == ADMIN_ID:
+        try:
+            new_limit = int(text.split()[-1])
+            cur = get_cursor()
+            if cur:
+                cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (str(new_limit), str(new_limit)))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 報名人數上限已設定為 {new_limit} 人"))
+        except:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：設定報名人數上限 數字"))
         return
 
     if text == "重置全部" and user_id == ADMIN_ID:
@@ -496,6 +573,9 @@ def handle_message(event):
         return
 
     if text == "查帳":
+        if not is_signed_up(user_id, group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「打球+1」報到"))
+            return
         count = get_count(user_id, group_id)
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
         return
@@ -600,13 +680,36 @@ def handle_message(event):
                     if is_whitelist(target_user_id, group_id):
                         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 在白名單中，無法記錄"))
                         return
+                    if not is_signed_up(target_user_id, group_id):
+                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
+                        return
                     
                     add_count(target_user_id, group_id, n)
                     new_count = get_count(target_user_id, group_id)
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {new_count} 次"))
                     return
 
+    signup_prefixes = ["今天打球", "明天打球"]
+    for prefix in signup_prefixes:
+        if text == f"{prefix}+1" or text == f"{prefix}+":
+            if is_signed_up(user_id, group_id):
+                signup(user_id, group_id, user_name)
+            else:
+                current = get_signup_count(group_id)
+                limit = get_signup_limit(group_id)
+                if current >= limit:
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 報名人數已滿（{current}/{limit}）"))
+                    return
+                signup(user_id, group_id, user_name)
+            add_count(user_id, group_id, 1, user_name)
+            count = get_count(user_id, group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {count} 次"))
+            return
+
     if text.startswith("+"):
+        if not is_signed_up(user_id, group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「打球+1」報到"))
+            return
         if text == "+" or text == "++":
             add_count(user_id, group_id, 1, user_name)
             count = get_count(user_id, group_id)
@@ -626,6 +729,9 @@ def handle_message(event):
         return
 
     if text.startswith("-"):
+        if not is_signed_up(user_id, group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「打球+1」報到"))
+            return
         try:
             if text == "-" or text == "--":
                 n = 1
