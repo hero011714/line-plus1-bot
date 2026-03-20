@@ -79,6 +79,7 @@ def is_whitelist(user_id):
 
 def add_to_whitelist(user_id, name=""):
     cursor.execute("INSERT OR REPLACE INTO whitelist (user_id, name) VALUES (?, ?)", (user_id, name))
+    cursor.execute("UPDATE users SET count=0 WHERE user_id=?", (user_id,))
     conn.commit()
 
 def remove_from_whitelist(user_id):
