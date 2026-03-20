@@ -410,25 +410,30 @@ def handle_message(event):
 
     if text == "狀態" and user_id == ADMIN_ID:
         try:
-            disk = psutil.disk_usage('/')
-            disk_used = disk.used / (1024 * 1024 * 1024)
-            disk_total = disk.total / (1024 * 1024 * 1024)
-            disk_percent = disk.percent
-            
+            cur = get_cursor()
             user_count, whitelist_count = get_group_stats(group_id)
             
             msg = "📊 系統狀態：\n\n"
-            msg += f"💾 硬碟使用：\n"
-            msg += f"   已使用：{disk_used:.2f} GB\n"
-            msg += f"   總計：{disk_total:.2f} GB\n"
-            msg += f"   使用率：{disk_percent:.1f}%\n\n"
+            db_size_mb = 0
+            
+            if cur:
+                try:
+                    cur.execute("SELECT pg_database_size(current_database())")
+                    db_size_bytes = cur.fetchone()[0]
+                    db_size_mb = db_size_bytes / (1024 * 1024)
+                    msg += f"💾 資料庫使用：{db_size_mb:.1f} MB\n\n"
+                except:
+                    msg += f"💾 資料庫使用：查詢失敗\n\n"
+            else:
+                msg += f"💾 資料庫使用：無法連線\n\n"
+            
             msg += f"👥 目前群組：\n"
             msg += f"   登記用戶：{user_count} 人\n"
             msg += f"   白名單：{whitelist_count} 人\n"
             msg += f"   目前單價：{price} 元"
             
-            if disk_percent > 80:
-                msg += "\n\n⚠️ 警告：硬碟使用率過高！"
+            if db_size_mb > 900:
+                msg += "\n\n⚠️ 警告：資料庫使用量接近上限！"
         except Exception as e:
             msg = f"❌ 無法取得狀態：{e}"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
