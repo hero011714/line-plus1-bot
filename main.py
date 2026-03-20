@@ -606,7 +606,8 @@ def handle_message(event):
     if text.startswith("+"):
         if text == "+" or text == "++":
             add_count(user_id, group_id, 1, user_name)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="收到~"))
+            count = get_count(user_id, group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {count} 次"))
         else:
             try:
                 n = int(text.lstrip("+"))
@@ -615,7 +616,8 @@ def handle_message(event):
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
                     return
                 add_count(user_id, group_id, n, user_name)
-                line_bot_api.reply_message(reply_token, TextSendMessage(text="收到~"))
+                count = get_count(user_id, group_id)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {count} 次"))
             except:
                 pass
         return
@@ -634,6 +636,7 @@ def handle_message(event):
                     ON CONFLICT (user_id, group_id) 
                     DO UPDATE SET count = GREATEST(users.count - %s, 0)
                 """, (user_id, group_id, n))
-                line_bot_api.reply_message(reply_token, TextSendMessage(text="收到~"))
+                count = get_count(user_id, group_id)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {count} 次"))
         except:
             pass
