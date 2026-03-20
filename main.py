@@ -18,77 +18,63 @@ handler = WebhookHandler(CHANNEL_SECRET)
 
 app = FastAPI()
 
-@app.get("/")
-def root():
-    commit_all()
-    return {"status": "ok", "message": "LINE Bot is running"}
-
-try:
-    if DATABASE_URL:
-        db_pool = pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
-    else:
-        db_pool = None
-except Exception as e:
-    print(f"Database connection failed: {e}")
-    db_pool = None
-
-def get_conn():
-    if db_pool:
-        return db_pool.getconn()
-    return None
-
-def release_conn(conn):
-    if db_pool and conn:
-        db_pool.putconn(conn)
-
-conn = get_conn()
-cursor = conn.cursor() if conn else None
+db_pool = None
+conn = None
+cursor = None
 
 def init_db():
-    global conn, cursor
-    conn = get_conn()
-    if not conn:
-        return
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT NOT NULL,
-            group_id TEXT NOT NULL,
-            name TEXT DEFAULT '',
-            count INTEGER DEFAULT 0,
-            last_fetch INTEGER DEFAULT 0,
-            PRIMARY KEY (user_id, group_id)
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS config (
-            group_id TEXT NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT,
-            PRIMARY KEY (group_id, key)
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS whitelist (
-            user_id TEXT NOT NULL,
-            group_id TEXT NOT NULL,
-            name TEXT DEFAULT '',
-            PRIMARY KEY (user_id, group_id)
-        )
-    """)
-    cursor.execute("INSERT OR IGNORE INTO config (group_id, key, value) VALUES ('default', 'price', '50')")
-    cursor.execute("INSERT OR IGNORE INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10')")
-    cursor.execute("INSERT OR IGNORE INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400')")
-    conn.commit()
+    global db_pool, conn, cursor
+    if not DATABASE_URL:
+        print("WARNING: DATABASE_URL not set!")
+        return False
+    try:
+        db_pool = pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+        conn = db_pool.getconn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                count INTEGER DEFAULT 0,
+                last_fetch INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, group_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                group_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                PRIMARY KEY (group_id, key)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS whitelist (
+                user_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                PRIMARY KEY (user_id, group_id)
+            )
+        """)
+        cursor.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
+        cursor.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
+        cursor.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
+        conn.commit()
+        print("Database initialized successfully")
+        return True
+    except Exception as e:
+        print(f"Database initialization failed: {e}")
+        return False
 
-if conn:
-    init_db()
+init_db()
 
 _pending_updates = []
 
 def commit_all():
-    global conn, _pending_updates
-    if not conn:
+    global conn, cursor, _pending_updates
+    if not conn or not cursor:
+        _pending_updates = []
         return
     try:
         for sql, params in _pending_updates:
@@ -109,98 +95,195 @@ def get_group_id(event):
         return 'private_' + event.source.user_id
 
 def get_price(group_id):
-    global conn, cursor
-    cursor.execute("SELECT value FROM config WHERE group_id=%s AND key='price'", (group_id,))
-    result = cursor.fetchone()
-    if result:
-        return int(result[0])
-    cursor.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', '50') ON CONFLICT DO NOTHING", (group_id,))
-    conn.commit()
-    return 50
+    global cursor
+    if not cursor:
+        return 50
+    try:
+        cursor.execute("SELECT value FROM config WHERE group_id=%s AND key='price'", (group_id,))
+        result = cursor.fetchone()
+        if result:
+            return int(result[0])
+        cursor.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', '50') ON CONFLICT DO NOTHING", (group_id,))
+        conn.commit()
+        return 50
+    except:
+        return 50
 
 def get_max_per_action():
-    cursor.execute("SELECT value FROM config WHERE group_id='default' AND key='max_per_action'")
-    result = cursor.fetchone()
-    return int(result[0]) if result else 10
+    global cursor
+    if not cursor:
+        return 10
+    try:
+        cursor.execute("SELECT value FROM config WHERE group_id='default' AND key='max_per_action'")
+        result = cursor.fetchone()
+        return int(result[0]) if result else 10
+    except:
+        return 10
 
 def set_price(group_id, price):
-    global conn
-    cursor.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(price), str(price)))
-    conn.commit()
+    global cursor, conn
+    if not cursor:
+        return
+    try:
+        cursor.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(price), str(price)))
+        conn.commit()
+    except:
+        pass
 
 def add_user(user_id, group_id, name=""):
-    global conn
-    cursor.execute("INSERT INTO users (user_id, group_id, name, count, last_fetch) VALUES (%s, %s, %s, 0, 0) ON CONFLICT (user_id, group_id) DO NOTHING", (user_id, group_id, name))
-    if name:
-        cursor.execute("UPDATE users SET name=%s WHERE user_id=%s AND group_id=%s", (name, user_id, group_id))
+    global cursor, conn
+    if not cursor:
+        return
+    try:
+        cursor.execute("INSERT INTO users (user_id, group_id, name, count, last_fetch) VALUES (%s, %s, %s, 0, 0) ON CONFLICT (user_id, group_id) DO NOTHING", (user_id, group_id, name))
+        if name:
+            cursor.execute("UPDATE users SET name=%s WHERE user_id=%s AND group_id=%s", (name, user_id, group_id))
+    except:
+        pass
 
 def update_user_name(user_id, group_id, name):
-    global conn
-    cursor.execute("UPDATE users SET name=%s, last_fetch=%s WHERE user_id=%s AND group_id=%s", (name, int(time.time()), user_id, group_id))
+    global cursor, conn
+    if not cursor:
+        return
+    try:
+        cursor.execute("UPDATE users SET name=%s, last_fetch=%s WHERE user_id=%s AND group_id=%s", (name, int(time.time()), user_id, group_id))
+    except:
+        pass
 
 def should_fetch_profile(user_id, group_id):
-    cursor.execute("SELECT last_fetch FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    result = cursor.fetchone()
-    if not result or result[0] == 0:
+    global cursor
+    if not cursor:
         return True
-    cursor.execute("SELECT value FROM config WHERE group_id='default' AND key='fetch_interval'")
-    result2 = cursor.fetchone()
-    interval = int(result2[0]) if result2 else 86400
-    return (int(time.time()) - result[0]) > interval
+    try:
+        cursor.execute("SELECT last_fetch FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        result = cursor.fetchone()
+        if not result or result[0] == 0:
+            return True
+        cursor.execute("SELECT value FROM config WHERE group_id='default' AND key='fetch_interval'")
+        result2 = cursor.fetchone()
+        interval = int(result2[0]) if result2 else 86400
+        return (int(time.time()) - result[0]) > interval
+    except:
+        return True
 
 def get_user_name(user_id, group_id):
-    cursor.execute("SELECT name FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    result = cursor.fetchone()
-    if result and result[0]:
-        return result[0]
-    cursor.execute("SELECT name FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    result2 = cursor.fetchone()
-    if result2 and result2[0]:
-        return result2[0]
-    return user_id[-4:]
+    global cursor
+    if not cursor:
+        return user_id[-4:]
+    try:
+        cursor.execute("SELECT name FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        result = cursor.fetchone()
+        if result and result[0]:
+            return result[0]
+        cursor.execute("SELECT name FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        result2 = cursor.fetchone()
+        if result2 and result2[0]:
+            return result2[0]
+        return user_id[-4:]
+    except:
+        return user_id[-4:]
 
 def is_whitelist(user_id, group_id):
-    cursor.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    return cursor.fetchone() is not None
+    global cursor
+    if not cursor:
+        return False
+    try:
+        cursor.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        return cursor.fetchone() is not None
+    except:
+        return False
 
 def add_to_whitelist(user_id, group_id, name=""):
+    global cursor, conn
     old_count = get_count(user_id, group_id)
-    cursor.execute("INSERT INTO whitelist (user_id, group_id, name) VALUES (%s, %s, %s) ON CONFLICT (user_id, group_id) DO UPDATE SET name = %s", (user_id, group_id, name, name))
-    cursor.execute("UPDATE users SET count=0 WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    conn.commit()
+    if not cursor:
+        return old_count
+    try:
+        cursor.execute("INSERT INTO whitelist (user_id, group_id, name) VALUES (%s, %s, %s) ON CONFLICT (user_id, group_id) DO UPDATE SET name = %s", (user_id, group_id, name, name))
+        cursor.execute("UPDATE users SET count=0 WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        conn.commit()
+    except:
+        pass
     return old_count
 
 def remove_from_whitelist(user_id, group_id):
-    global conn
-    cursor.execute("DELETE FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    conn.commit()
+    global cursor, conn
+    if not cursor:
+        return
+    try:
+        cursor.execute("DELETE FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        conn.commit()
+    except:
+        pass
 
 def get_whitelist(group_id):
-    cursor.execute("SELECT user_id, name FROM whitelist WHERE group_id=%s", (group_id,))
-    return cursor.fetchall()
+    global cursor
+    if not cursor:
+        return []
+    try:
+        cursor.execute("SELECT user_id, name FROM whitelist WHERE group_id=%s", (group_id,))
+        return cursor.fetchall()
+    except:
+        return []
 
 def add_count(user_id, group_id, n=1):
-    cursor.execute("UPDATE users SET count = count + %s WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+    global cursor
+    if not cursor:
+        return
+    try:
+        cursor.execute("UPDATE users SET count = count + %s WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+    except:
+        pass
 
 def get_count(user_id, group_id):
-    cursor.execute("SELECT count FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    result = cursor.fetchone()
-    return result[0] if result else 0
+    global cursor
+    if not cursor:
+        return 0
+    try:
+        cursor.execute("SELECT count FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        result = cursor.fetchone()
+        return result[0] if result else 0
+    except:
+        return 0
 
 def clear_user(user_id, group_id):
-    cursor.execute("UPDATE users SET count=0 WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+    global cursor
+    if not cursor:
+        return
+    try:
+        cursor.execute("UPDATE users SET count=0 WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+    except:
+        pass
 
 def clear_all_users(group_id):
-    cursor.execute("UPDATE users SET count=0 WHERE group_id=%s", (group_id,))
+    global cursor
+    if not cursor:
+        return
+    try:
+        cursor.execute("UPDATE users SET count=0 WHERE group_id=%s", (group_id,))
+    except:
+        pass
 
 def get_all_users(group_id):
-    cursor.execute("SELECT user_id, name, count FROM users WHERE group_id=%s", (group_id,))
-    return cursor.fetchall()
+    global cursor
+    if not cursor:
+        return []
+    try:
+        cursor.execute("SELECT user_id, name, count FROM users WHERE group_id=%s", (group_id,))
+        return cursor.fetchall()
+    except:
+        return []
 
 def get_user_by_name(name, group_id):
-    cursor.execute("SELECT user_id FROM users WHERE name=%s AND group_id=%s", (name, group_id))
-    result = cursor.fetchone()
-    return result[0] if result else None
+    global cursor
+    if not cursor:
+        return None
+    try:
+        cursor.execute("SELECT user_id FROM users WHERE name=%s AND group_id=%s", (name, group_id))
+        result = cursor.fetchone()
+        return result[0] if result else None
+    except:
+        return None
 
 def get_mentioned_users(event, exclude_id=None):
     mentioned = []
@@ -309,7 +392,8 @@ def handle_message(event):
 
     if text == "重置全部" and user_id == ADMIN_ID:
         clear_all_users(group_id)
-        conn.commit()
+        if conn:
+            conn.commit()
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除此群組所有人的帳目"))
         return
 
@@ -413,7 +497,8 @@ def handle_message(event):
         if target_user_id:
             old_count = get_count(target_user_id, group_id)
             clear_user(target_user_id, group_id)
-            conn.commit()
+            if conn:
+                conn.commit()
             name_display = f"@{target_name}" if target_name else target_user_id[-4:]
             msg = f"✅ 已清除 {name_display} 的帳目"
             if old_count > 0:
@@ -447,7 +532,8 @@ def handle_message(event):
                         return
                     
                     add_count(target_user_id, group_id, n)
-                    conn.commit()
+                    if conn:
+                        conn.commit()
                     new_count = get_count(target_user_id, group_id)
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已替 @{target_name} 記錄 +{n} 次（共 {new_count} 次，應繳 {new_count*price} 元）"))
                     return
@@ -475,6 +561,7 @@ def handle_message(event):
                 n = int(text.lstrip("-"))
             count = get_count(user_id, group_id)
             new_count = max(0, count - n)
-            cursor.execute("UPDATE users SET count=%s WHERE user_id=%s AND group_id=%s", (new_count, user_id, group_id))
+            if cursor:
+                cursor.execute("UPDATE users SET count=%s WHERE user_id=%s AND group_id=%s", (new_count, user_id, group_id))
         except:
             pass
