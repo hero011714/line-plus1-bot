@@ -244,9 +244,10 @@ def add_count(user_id, group_id, n=1):
     if not cursor:
         return
     try:
-        cursor.execute("UPDATE users SET count = count + %s WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+        cursor.execute("INSERT INTO users (user_id, group_id, count, last_fetch) VALUES (%s, %s, %s, 0) ON CONFLICT (user_id, group_id) DO UPDATE SET count = users.count + %s", (user_id, group_id, n, n))
         conn.commit()
-    except:
+    except Exception as e:
+        print(f"add_count error: {e}")
         pass
 
 def get_count(user_id, group_id):
