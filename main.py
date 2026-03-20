@@ -606,6 +606,8 @@ def handle_message(event):
     if text.startswith("+"):
         if text == "+" or text == "++":
             add_count(user_id, group_id, 1, user_name)
+            count = get_count(user_id, group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已記錄，目前 {count} 次，應繳 {count*price} 元"))
         else:
             try:
                 n = int(text.lstrip("+"))
@@ -614,6 +616,8 @@ def handle_message(event):
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
                     return
                 add_count(user_id, group_id, n, user_name)
+                count = get_count(user_id, group_id)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已記錄 +{n} 次，目前 {count} 次，應繳 {count*price} 元"))
             except:
                 pass
         return
@@ -632,5 +636,7 @@ def handle_message(event):
                     ON CONFLICT (user_id, group_id) 
                     DO UPDATE SET count = GREATEST(users.count - %s, 0)
                 """, (user_id, group_id, n))
+                count = get_count(user_id, group_id)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已扣除 {n} 次，目前 {count} 次，應繳 {count*price} 元"))
         except:
             pass
