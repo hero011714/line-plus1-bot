@@ -240,11 +240,12 @@ def get_whitelist(group_id):
         return []
 
 def add_count(user_id, group_id, n=1):
-    global cursor
+    global cursor, conn
     if not cursor:
         return
     try:
         cursor.execute("UPDATE users SET count = count + %s WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+        conn.commit()
     except:
         pass
 
