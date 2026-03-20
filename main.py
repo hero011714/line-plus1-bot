@@ -530,17 +530,25 @@ def handle_message(event):
         return
 
     if text.startswith("白名單移除") and user_id == ADMIN_ID:
-        parts = text.replace("白名單移除", "").strip()
-        if parts.startswith("@"):
-            parts = parts[1:]
-        
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
         target_user_id = None
-        if parts:
-            target_user_id = get_user_by_name(parts, group_id)
+        target_name = None
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        
+        if not target_user_id:
+            parts = text.replace("白名單移除", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
         
         if target_user_id:
             remove_from_whitelist(target_user_id, group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 @{parts} 移出白名單"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 @{target_name} 移出白名單"))
         else:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「白名單移除 @人」格式"))
         return
@@ -564,13 +572,8 @@ def handle_message(event):
                 target_name = parts
         
         if target_user_id:
-            old_count = get_count(target_user_id, group_id)
             clear_user(target_user_id, group_id)
-            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
-            msg = f"✅ 已清除 {name_display} 的帳目"
-            if old_count > 0:
-                msg += f"\n（已清除 {old_count} 次，金額 {old_count*price} 元）"
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 0 次"))
         else:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
         return
