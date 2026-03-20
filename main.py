@@ -600,7 +600,7 @@ def handle_message(event):
                     
                     add_count(target_user_id, group_id, n)
                     new_count = get_count(target_user_id, group_id)
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已替 @{target_name} 記錄 +{n} 次（共 {new_count} 次，應繳 {new_count*price} 元）"))
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 {new_count} 次"))
                     return
 
     if text.startswith("+"):
