@@ -633,5 +633,6 @@ def handle_message(event):
             new_count = max(0, count - n)
             if cursor:
                 cursor.execute("UPDATE users SET count=%s WHERE user_id=%s AND group_id=%s", (new_count, user_id, group_id))
+                conn.commit()
         except:
             pass
