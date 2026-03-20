@@ -262,13 +262,17 @@ def add_count(user_id, group_id, n=1, name=""):
 
 def get_count(user_id, group_id):
     global cursor
+    print(f"DEBUG get_count: user={user_id}, group={group_id}, cursor={cursor}")
     if not cursor:
+        print("DEBUG get_count: cursor is None!")
         return 0
     try:
         cursor.execute("SELECT count FROM users WHERE user_id=%s AND group_id=%s", (user_id, group_id))
         result = cursor.fetchone()
+        print(f"DEBUG get_count: result={result}")
         return result[0] if result else 0
-    except:
+    except Exception as e:
+        print(f"DEBUG get_count error: {e}")
         return 0
 
 def clear_user(user_id, group_id):
@@ -507,7 +511,9 @@ def handle_message(event):
         return
 
     if text == "查帳":
+        print(f"DEBUG: 查帳 command, user={user_id}, group={group_id}")
         count = get_count(user_id, group_id)
+        print(f"DEBUG: 查帳 result count={count}")
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
         return
 
@@ -619,8 +625,9 @@ def handle_message(event):
                     return
 
     if text.startswith("+"):
+        print(f"DEBUG: + command received, user={user_id}, group={group_id}")
         if text == "+" or text == "++":
-            add_count(user_id, group_id, 1)
+            add_count(user_id, group_id, 1, user_name)
         else:
             try:
                 n = int(text.lstrip("+"))
@@ -628,9 +635,9 @@ def handle_message(event):
                 if n > max_n:
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
                     return
-                add_count(user_id, group_id, n)
-            except:
-                pass
+                add_count(user_id, group_id, n, user_name)
+            except Exception as e:
+                print(f"DEBUG: + command error: {e}")
         return
 
     if text.startswith("-"):
