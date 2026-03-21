@@ -922,6 +922,7 @@ def handle_message(event):
             except:
                 n = 0
         if n <= 0:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 +、++、+5）"))
             return
         max_n = get_max_per_action()
         if n > max_n:
@@ -954,25 +955,29 @@ def handle_message(event):
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「+1」報到"))
             return
-        try:
-            if text == "-" or text == "--":
-                n = 1
-            else:
+        if text == "-" or text == "--":
+            n = 1
+        else:
+            try:
                 n = int(text.lstrip("-"))
-            cur = get_cursor()
-            if cur:
-                cur.execute("""
-                    INSERT INTO users (user_id, group_id, count, last_fetch)
-                    VALUES (%s, %s, 0, 0)
-                    ON CONFLICT (user_id, group_id) 
-                    DO UPDATE SET count = GREATEST(users.count - %s, 0)
-                """, (user_id, group_id, n))
-                cur.execute("""
-                    UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id = %s
-                """, (n, group_id))
-            count = get_total_count(group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
-        except Exception as e:
-            print(f"Minus error: {e}")
-            count = get_total_count(group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
+            except:
+                n = 0
+        if n <= 0:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、--、-5）"))
+            return
+        cur = get_cursor()
+        if cur:
+            cur.execute("""
+                INSERT INTO users (user_id, group_id, count, last_fetch)
+                VALUES (%s, %s, 0, 0)
+                ON CONFLICT (user_id, group_id) 
+                DO UPDATE SET count = GREATEST(users.count - %s, 0)
+            """, (user_id, group_id, n))
+            cur.execute("""
+                UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id = %s
+            """, (n, group_id))
+        count = get_total_count(group_id)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
+        return
+
+    line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 指令錯誤，請輸入「幫助」查看指令列表"))
