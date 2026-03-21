@@ -587,6 +587,7 @@ def handle_message(event):
         return
 
     if text in ["幫助", "help"]:
+        is_admin = (user_id == ADMIN_ID)
         msg = "📋 記帳機器人指令：\n\n"
         msg += "【一般指令】\n"
         msg += "今天打球+1 / 明天打球+1：開團\n\n"
@@ -595,22 +596,26 @@ def handle_message(event):
         msg += "+N：+N 次（上限 10）\n"
         msg += "- 或 --：-1 次\n"
         msg += "-N：-N 次\n"
-        msg += "查帳：查看自己的帳目\n\n"
-        msg += "【管理員指令】\n"
-        msg += "設定單價 [數字]\n"
-        msg += "設定報名人數上限 [數字]\n"
-        msg += "白名單加入 @人\n"
-        msg += "白名單移除 @人\n"
-        msg += "白名單：查看白名單\n"
-        msg += "已繳 @人：清除帳目\n"
-        msg += "@人 +N：替他人記錄（教練）\n"
-        msg += "重置全部：清除所有人帳目\n"
-        msg += "全部帳單：查看所有人的欠款\n"
-        msg += "退出群組：清除資料並退出\n"
-        msg += "狀態：查看系統狀態\n"
-        msg += "測試：查看系統測試報告\n\n"
-        msg += "【特殊指令】\n"
-        msg += "群組ID：查看目前群組ID"
+        msg += "查帳：查看自己的帳目\n"
+        if is_admin:
+            msg += "\n【管理員指令】\n"
+            msg += "設定單價 [數字]\n"
+            msg += "設定報名人數上限 [數字]\n"
+            msg += "白名單加入 @人\n"
+            msg += "白名單移除 @人\n"
+            msg += "白名單：查看白名單\n"
+            msg += "已繳 @人：清除帳目\n"
+            msg += "@人 +N：替他人記錄（教練）\n"
+            msg += "重置全部：清除所有人帳目\n"
+            msg += "全部帳單：查看所有人的欠款\n"
+            msg += "退出群組：清除資料並退出\n"
+            msg += "狀態：查看系統狀態\n"
+            msg += "測試：查看系統測試報告\n\n"
+            msg += "【特殊指令】\n"
+            msg += "群組ID：查看目前群組ID"
+        else:
+            msg += "\n【特殊指令】\n"
+            msg += "群組ID：查看目前群組ID"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
