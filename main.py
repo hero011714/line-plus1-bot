@@ -809,7 +809,20 @@ def handle_message(event):
         parts = text.split()
         if len(parts) >= 2:
             target_name = parts[0].replace("@", "")
-            target_user_id = get_user_by_name(target_name, group_id)
+            
+            mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+            target_user_id = None
+            for m_user_id, m_name in mentioned:
+                target_user_id = m_user_id
+                target_name = m_name
+                break
+            
+            if not target_user_id:
+                target_user_id = get_user_by_name(target_name, group_id)
+            
+            if not target_user_id:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ 找不到 @{target_name}，請先傳訊息讓機器人學習"))
+                return
             
             if target_user_id and len(parts) >= 2:
                 count_text = parts[1]
