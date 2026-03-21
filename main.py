@@ -739,7 +739,13 @@ def handle_message(event):
     if text == "重置全部" and user_id == ADMIN_ID:
         clear_all_users(group_id)
         clear_signups(group_id)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除此群組所有人的帳目與報名"))
+        cur = get_cursor()
+        if cur:
+            try:
+                cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+            except:
+                pass
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除此群組所有人的帳目、報名與活動"))
         return
 
     if text == "全部帳單" and user_id == ADMIN_ID:
