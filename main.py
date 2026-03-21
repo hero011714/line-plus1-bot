@@ -893,7 +893,7 @@ def handle_message(event):
                     limit = get_signup_limit(group_id)
                     current_total = get_total_count(group_id)
                     if current_total + n > limit:
-                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 累計人數已達上限（{current_total}/{limit}）"))
+                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
                         return
                     add_count(target_user_id, group_id, n)
                     add_total_count(group_id, n)
@@ -904,8 +904,6 @@ def handle_message(event):
     signup_prefixes = ["今天打球", "明天打球"]
     for prefix in signup_prefixes:
         if text == f"{prefix}+1" or text == f"{prefix}+":
-            if user_id != ADMIN_ID:
-                return
             count = coach_open_event(user_id, group_id, user_name)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"報名成功，累計人數 {count} 人"))
             return
