@@ -904,6 +904,10 @@ def handle_message(event):
     signup_prefixes = ["今天打球", "明天打球"]
     for prefix in signup_prefixes:
         if text == f"{prefix}+1" or text == f"{prefix}+":
+            if is_event_active(group_id):
+                remaining = get_event_remaining_hours(group_id)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 活動進行中，請等待結束後再開團（剩餘 {remaining} 小時）"))
+                return
             count = coach_open_event(user_id, group_id, user_name)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"報名成功，累計人數 {count} 人"))
             return
