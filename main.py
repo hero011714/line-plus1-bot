@@ -873,7 +873,7 @@ def handle_message(event):
         limit = get_signup_limit(group_id)
         current_total = get_total_count(group_id)
         if current_total + n > limit:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 累計人數已達上限（{current_total}/{limit}）"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
             return
         
         first_signup = not is_signed_up(user_id, group_id)
