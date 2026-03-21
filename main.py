@@ -515,8 +515,10 @@ def get_mentioned_users(event, exclude_id=None):
     mentioned = []
     group_id = get_group_id(event)
     mention = getattr(event.message, 'mention', None)
+    print(f"[DEBUG get_mentioned_users] mention={mention}, exclude_id={exclude_id}")
     if mention and hasattr(mention, 'mentionees'):
         for m in mention.mentionees:
+            print(f"[DEBUG get_mentioned_users] mentionee user_id={m.user_id}, is_middle={getattr(m, 'is_middle', None)}")
             if m.user_id and m.user_id != exclude_id:
                 name = get_user_name(m.user_id, group_id)
                 try:
@@ -557,7 +559,7 @@ def handle_message(event):
     user_id = event.source.user_id
     raw_text = event.message.text
     text = raw_text.strip()
-    print(f"[DEBUG] raw_text={repr(raw_text)}, stripped={repr(text)}")
+    print(f"[DEBUG] raw_text={repr(raw_text)}, stripped={repr(text)}, starts_plus={text.startswith('+')}, starts_at={text.startswith('@')}, equals_plus={text=='+'}")
     group_id = get_group_id(event)
     price = get_price(group_id)
     user_name = get_user_name(user_id, group_id)
@@ -825,6 +827,7 @@ def handle_message(event):
         return
 
     if text.startswith("@") and user_id == ADMIN_ID:
+        print(f"[DEBUG] ENTERED @ BLOCK: text={repr(text)}, parts={text.split()}")
         parts = text.split()
         if len(parts) >= 2:
             target_name = parts[0].replace("@", "")
@@ -885,6 +888,7 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
+        print(f"[DEBUG] ENTERED + BLOCK: text={repr(text)}, raw={repr(raw_text)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
