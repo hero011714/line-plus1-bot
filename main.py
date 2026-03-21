@@ -86,6 +86,8 @@ def init_tables():
                 total_count INTEGER DEFAULT 0
             )
         """)
+        cur.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS total_count INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE signups DROP COLUMN IF EXISTS expires_at")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
@@ -372,20 +374,17 @@ def get_event_remaining_hours(group_id):
 def coach_open_event(user_id, group_id, user_name):
     conn_local = get_db()
     if not conn_local:
-        print("DBG: no conn")
         return 0
     cur = conn_local.cursor()
     try:
         now = int(time.time())
         expires = now + 48 * 3600
-        print(f"DBG: now={now}, expires={expires}")
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
         cur.execute("""
             INSERT INTO events (group_id, started_at, expires_at, total_count)
             VALUES (%s, %s, %s, 1)
         """, (group_id, now, expires))
-        print("DBG: events inserted")
         cur.execute("""
             INSERT INTO signups (user_id, group_id, name, signup_time)
             VALUES (%s, %s, %s, %s)
@@ -398,7 +397,6 @@ def coach_open_event(user_id, group_id, user_name):
         """, (user_id, group_id, user_name))
         cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
         result = cur.fetchone()
-        print(f"DBG: result={result}")
         return result[0] if result else 1
     except Exception as e:
         print(f"coach_open_event error: {e}")
