@@ -86,8 +86,18 @@ def init_tables():
                 total_count INTEGER DEFAULT 0
             )
         """)
-        cur.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS total_count INTEGER DEFAULT 0")
-        cur.execute("ALTER TABLE signups DROP COLUMN IF EXISTS expires_at")
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='events' AND column_name='total_count'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE events ADD COLUMN total_count INTEGER DEFAULT 0")
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='signups' AND column_name='expires_at'
+        """)
+        if cur.fetchone():
+            cur.execute("ALTER TABLE signups DROP COLUMN expires_at")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
@@ -377,6 +387,13 @@ def coach_open_event(user_id, group_id, user_name):
         return 0
     cur = conn_local.cursor()
     try:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='events' AND column_name='total_count'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE events ADD COLUMN total_count INTEGER DEFAULT 0")
+        
         now = int(time.time())
         expires = now + 48 * 3600
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
