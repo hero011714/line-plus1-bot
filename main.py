@@ -730,9 +730,13 @@ def handle_message(event):
             cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (uid, gid))
             if cur.fetchone():
                 continue
-            if name:
-                display_name = name
-            else:
+            display_name = name
+            if not display_name:
+                cur.execute("SELECT name FROM signups WHERE user_id=%s", (uid,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    display_name = row[0]
+            if not display_name:
                 try:
                     profile = line_bot_api.get_profile(uid)
                     display_name = profile.display_name
