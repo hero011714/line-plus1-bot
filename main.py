@@ -370,18 +370,22 @@ def get_event_remaining_hours(group_id):
         return 0
 
 def coach_open_event(user_id, group_id, user_name):
-    cur = get_cursor()
-    if not cur:
+    conn_local = get_db()
+    if not conn_local:
+        print("DBG: no conn")
         return 0
+    cur = conn_local.cursor()
     try:
         now = int(time.time())
         expires = now + 48 * 3600
+        print(f"DBG: now={now}, expires={expires}")
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
         cur.execute("""
             INSERT INTO events (group_id, started_at, expires_at, total_count)
             VALUES (%s, %s, %s, 1)
         """, (group_id, now, expires))
+        print("DBG: events inserted")
         cur.execute("""
             INSERT INTO signups (user_id, group_id, name, signup_time)
             VALUES (%s, %s, %s, %s)
@@ -394,6 +398,7 @@ def coach_open_event(user_id, group_id, user_name):
         """, (user_id, group_id, user_name))
         cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
         result = cur.fetchone()
+        print(f"DBG: result={result}")
         return result[0] if result else 1
     except Exception as e:
         print(f"coach_open_event error: {e}")
