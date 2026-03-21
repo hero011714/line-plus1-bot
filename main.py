@@ -588,9 +588,9 @@ def handle_message(event):
         msg = "📋 記帳機器人指令：\n\n"
         msg += "【指令】\n"
         msg += "今天打球+1 / 明天打球+1：開團\n"
-        msg += "+ 或 ++：+1 次（需先開團）\n"
+        msg += "+：+1 次（需先開團）\n"
         msg += "+N：+N 次（上限 10）\n"
-        msg += "- 或 --：-1 次\n"
+        msg += "-：-1 次\n"
         msg += "-N：-N 次\n"
         msg += "查帳：查看自己的帳目\n"
         if is_admin:
@@ -700,8 +700,8 @@ def handle_message(event):
             if uid in whitelist_ids:
                 continue
             if count > 0:
-                display_name = f"@{name}" if name else uid[-4:]
-                msg += f"{display_name}: {count}次 / {count*price}元\n"
+                display_name = name if name else get_user_name(uid, group_id)
+                msg += f"@{display_name}: {count}次 / {count*price}元\n"
                 has_debt = True
         if not has_debt:
             msg = "✅ 目前無欠款"
@@ -856,7 +856,7 @@ def handle_message(event):
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
-        if text == "+" or text == "++":
+        if text == "+":
             n = 1
         else:
             try:
@@ -864,7 +864,7 @@ def handle_message(event):
             except:
                 n = 0
         if n <= 0:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 +、++、+5）"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 +、+5）"))
             return
         max_n = get_max_per_action()
         if n > max_n:
@@ -897,7 +897,7 @@ def handle_message(event):
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「+1」報到"))
             return
-        if text == "-" or text == "--":
+        if text == "-":
             n = 1
         else:
             try:
@@ -905,7 +905,7 @@ def handle_message(event):
             except:
                 n = 0
         if n <= 0:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、--、-5）"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、-5）"))
             return
         cur = get_cursor()
         if cur:
