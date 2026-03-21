@@ -602,21 +602,11 @@ def handle_message(event):
             msg += "白名單：查看白名單\n"
             msg += "已繳 @人：清除帳目\n"
             msg += "@人 +N：替他人記錄（教練）\n"
-            msg += "重置全部：清除所有人帳目\n"
+            msg += "重置全部：清除所有紀錄資料\n"
             msg += "全部帳單：查看所有人的欠款\n"
             msg += "退出群組：清除資料並退出\n"
-            msg += "狀態：查看系統狀態\n"
-            msg += "測試：查看系統測試報告\n\n"
-            msg += "【特殊指令】\n"
-            msg += "群組ID：查看目前群組ID"
-        else:
-            msg += "\n【特殊指令】\n"
-            msg += "群組ID：查看目前群組ID"
+            msg += "狀態：查看系統狀態"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
-        return
-
-    if text == "群組ID":
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"📌 目前群組ID：\n{group_id}"))
         return
 
     if text == "狀態" and user_id == ADMIN_ID:
@@ -668,56 +658,6 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ 退出失敗：{e}"))
         return
 
-    if text == "測試" and user_id == ADMIN_ID:
-        try:
-            cur = get_db()
-            db_status = "✅ 資料庫連線正常" if cur and not cur.closed else "❌ 資料庫連線失敗"
-            
-            event_active = is_event_active(group_id)
-            remaining = get_event_remaining_hours(group_id)
-            signup_count = get_signup_count(group_id)
-            signup_limit = get_signup_limit(group_id)
-            total = get_total_count(group_id)
-            user_count, whitelist_count = get_group_stats(group_id)
-            
-            rows = get_all_users(group_id)
-            signup_rows = []
-            try:
-                c = get_cursor()
-                if c:
-                    c.execute("SELECT user_id, name, count FROM signups WHERE group_id=%s", (group_id,))
-                    signup_rows = c.fetchall()
-            except:
-                pass
-            
-            msg = f"🔧 系統測試報告\n\n"
-            msg += f"{db_status}\n\n"
-            msg += f"📊 活動狀態：{'已開啟' if event_active else '未開啟'}\n"
-            msg += f"   剩餘時間：{remaining} 小時\n"
-            msg += f"   累計人數：{total} 人\n"
-            msg += f"   報名人數：{signup_count} / {signup_limit} 人\n"
-            msg += f"   登記用戶：{user_count} 人\n"
-            msg += f"   白名單：{whitelist_count} 人\n\n"
-            
-            if signup_rows:
-                msg += "📋 報名名單：\n"
-                for uid, name, _ in signup_rows:
-                    msg += f"   @{name}\n"
-            else:
-                msg += "📋 報名名單：無\n"
-            
-            msg += "\n📋 帳目列表：\n"
-            if rows:
-                for uid, name, cnt in rows:
-                    display_name = f"@{name}" if name else uid[-4:]
-                    msg += f"   {display_name}: {cnt}次\n"
-            else:
-                msg += "   無\n"
-        except Exception as e:
-            msg = f"❌ 測試失敗：{e}"
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
-        return
-
     if text.startswith("設定單價") and user_id == ADMIN_ID:
         try:
             new_price = int(text.split()[-1])
@@ -747,7 +687,7 @@ def handle_message(event):
                 cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
             except:
                 pass
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除此群組所有人的帳目、報名與活動"))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除所有紀錄資料"))
         return
 
     if text == "全部帳單" and user_id == ADMIN_ID:
