@@ -539,6 +539,10 @@ def get_mentioned_users(event, exclude_id=None):
                 mentioned.append((m.user_id, name))
     return mentioned, group_id
 
+@app.get("/")
+async def health_check():
+    return "OK"
+
 @app.post("/callback")
 async def callback(request: Request):
     body = await request.body()
@@ -921,32 +925,32 @@ def handle_message(event):
                 n = int(text.lstrip("+"))
             except:
                 n = 0
-        if n > 0:
-            max_n = get_max_per_action()
-            if n > max_n:
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
-                return
-            limit = get_signup_limit(group_id)
-            current_total = get_total_count(group_id)
-            if current_total + n > limit:
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 累計人數已達上限（{current_total}/{limit}）"))
-                return
-        if not is_signed_up(user_id, group_id):
+        if n <= 0:
+            return
+        max_n = get_max_per_action()
+        if n > max_n:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
+            return
+        limit = get_signup_limit(group_id)
+        current_total = get_total_count(group_id)
+        if current_total + n > limit:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 累計人數已達上限（{current_total}/{limit}）"))
+            return
+        
+        first_signup = not is_signed_up(user_id, group_id)
+        if first_signup:
             signed_up = atomic_signup(user_id, group_id, user_name)
             if not signed_up:
                 current = get_signup_count(group_id)
-                limit = get_signup_limit(group_id)
                 line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 報名人數已滿（{current}/{limit}）"))
                 return
-            add_count(user_id, group_id, 1, user_name)
-            add_total_count(group_id, 1)
-            count = get_total_count(group_id)
+        
+        add_count(user_id, group_id, n, user_name)
+        add_total_count(group_id, n)
+        count = get_total_count(group_id)
+        if first_signup:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"報名成功，累計人數 {count} 人"))
         else:
-            if n > 0:
-                add_count(user_id, group_id, n, user_name)
-                add_total_count(group_id, n)
-            count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
 
