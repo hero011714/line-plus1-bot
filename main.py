@@ -603,7 +603,7 @@ def handle_message(event):
             msg += "已繳 @人：清除帳目\n"
             msg += "@人 +N：替他人記錄（教練）\n"
             msg += "重置全部：清除所有紀錄資料\n"
-            msg += "全部帳單：查看所有人的欠款\n"
+            msg += "全部帳單：查看所有群組的欠款\n"
             msg += "退出群組：清除資料並退出\n"
             msg += "狀態：查看系統狀態"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
@@ -691,18 +691,35 @@ def handle_message(event):
         return
 
     if text == "全部帳單" and user_id == ADMIN_ID:
-        rows = get_all_users(group_id)
-        whitelist_data = get_whitelist(group_id)
-        whitelist_ids = [u[0] for u in whitelist_data]
-        msg = "📋 全部帳單：\n"
+        cur = get_cursor()
+        if not cur:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
+            return
+        cur.execute("""
+            SELECT u.user_id, u.name, u.count, u.group_id
+            FROM users u
+            WHERE u.count > 0
+            ORDER BY u.group_id, u.count DESC
+        """)
+        rows = cur.fetchall()
+        
+        msg = "📋 全部帳單（跨所有群組）：\n\n"
         has_debt = False
-        for uid, name, count in rows:
-            if uid in whitelist_ids:
+        current_gid = None
+        for uid, name, count, gid in rows:
+            if gid != current_gid:
+                current_gid = gid
+                group_label = gid if not gid.startswith('private_') else '私聊'
+                msg += f"【{group_label}】\n"
+            cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (uid, gid))
+            if cur.fetchone():
                 continue
-            if count > 0:
-                display_name = name if name else get_user_name(uid, group_id)
-                msg += f"@{display_name}: {count}次 / {count*price}元\n"
-                has_debt = True
+            display_name = name if name else uid[-4:]
+            cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
+            price_row = cur.fetchone()
+            group_price = int(price_row[0]) if price_row else 50
+            msg += f"  @{display_name}: {count}次 / {count*group_price}元\n"
+            has_debt = True
         if not has_debt:
             msg = "✅ 目前無欠款"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
