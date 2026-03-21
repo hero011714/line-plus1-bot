@@ -901,6 +901,23 @@ def handle_message(event):
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
+        if text == "+" or text == "++":
+            n = 1
+        else:
+            try:
+                n = int(text.lstrip("+"))
+            except:
+                n = 0
+        if n > 0:
+            max_n = get_max_per_action()
+            if n > max_n:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
+                return
+            limit = get_signup_limit(group_id)
+            current_total = get_total_count(group_id)
+            if current_total + n > limit:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 累計人數已達上限（{current_total}/{limit}）"))
+                return
         if not is_signed_up(user_id, group_id):
             signed_up = atomic_signup(user_id, group_id, user_name)
             if not signed_up:
@@ -910,25 +927,12 @@ def handle_message(event):
                 return
             add_count(user_id, group_id, 1, user_name)
             add_total_count(group_id, 1)
-            count = get_total_count(group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         else:
-            if text == "+" or text == "++":
-                n = 1
-            else:
-                try:
-                    n = int(text.lstrip("+"))
-                except:
-                    n = 0
             if n > 0:
-                max_n = get_max_per_action()
-                if n > max_n:
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 單次最多 +{max_n} 次"))
-                    return
                 add_count(user_id, group_id, n, user_name)
                 add_total_count(group_id, n)
-            count = get_total_count(group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
+        count = get_total_count(group_id)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
 
     if text.startswith("-"):
