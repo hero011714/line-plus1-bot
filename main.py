@@ -369,20 +369,35 @@ def get_event_remaining_hours(group_id):
     except:
         return 0
 
-def start_event(group_id):
+def coach_open_event(user_id, group_id, user_name):
     cur = get_cursor()
     if not cur:
-        return
+        return 0
     try:
         now = int(time.time())
         expires = now + 48 * 3600
+        cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
         cur.execute("""
             INSERT INTO events (group_id, started_at, expires_at, total_count)
             VALUES (%s, %s, %s, 1)
         """, (group_id, now, expires))
+        cur.execute("""
+            INSERT INTO signups (user_id, group_id, name, signup_time)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, group_id, user_name, now))
+        cur.execute("""
+            INSERT INTO users (user_id, group_id, name, count, last_fetch)
+            VALUES (%s, %s, %s, 1, 0)
+            ON CONFLICT (user_id, group_id)
+            DO UPDATE SET count = users.count + 1, name = EXCLUDED.name
+        """, (user_id, group_id, user_name))
+        cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
+        result = cur.fetchone()
+        return result[0] if result else 1
     except Exception as e:
-        print(f"start_event error: {e}")
+        print(f"coach_open_event error: {e}")
+        return 1
 
 def add_total_count(group_id, n):
     cur = get_cursor()
@@ -858,11 +873,7 @@ def handle_message(event):
         if text == f"{prefix}+1" or text == f"{prefix}+":
             if user_id != ADMIN_ID:
                 return
-            clear_signups(group_id)
-            start_event(group_id)
-            atomic_signup(user_id, group_id, user_name)
-            add_count(user_id, group_id, 1, user_name)
-            count = get_total_count(group_id)
+            count = coach_open_event(user_id, group_id, user_name)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
             return
 
