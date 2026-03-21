@@ -376,14 +376,13 @@ def start_event(group_id):
     try:
         now = int(time.time())
         expires = now + 48 * 3600
+        cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
         cur.execute("""
             INSERT INTO events (group_id, started_at, expires_at, total_count)
             VALUES (%s, %s, %s, 1)
-            ON CONFLICT (group_id)
-            DO UPDATE SET started_at = EXCLUDED.started_at, expires_at = EXCLUDED.expires_at, total_count = EXCLUDED.total_count
         """, (group_id, now, expires))
-    except:
-        pass
+    except Exception as e:
+        print(f"start_event error: {e}")
 
 def add_total_count(group_id, n):
     cur = get_cursor()
