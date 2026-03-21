@@ -730,7 +730,14 @@ def handle_message(event):
             cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (uid, gid))
             if cur.fetchone():
                 continue
-            display_name = name if name else uid[-4:]
+            if name:
+                display_name = name
+            else:
+                try:
+                    profile = line_bot_api.get_profile(uid)
+                    display_name = profile.display_name
+                except:
+                    display_name = uid[-4:]
             cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
             price_row = cur.fetchone()
             group_price = int(price_row[0]) if price_row else 50
