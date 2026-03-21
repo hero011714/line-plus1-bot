@@ -900,6 +900,7 @@ def handle_message(event):
                     new_count = get_total_count(group_id)
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
                     return
+                    return
 
     signup_prefixes = ["今天打球", "明天打球"]
     for prefix in signup_prefixes:
@@ -907,7 +908,7 @@ def handle_message(event):
             if user_id != ADMIN_ID:
                 return
             count = coach_open_event(user_id, group_id, user_name)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"報名成功，累計人數 {count} 人"))
             return
 
     if text.startswith("+"):
@@ -940,12 +941,14 @@ def handle_message(event):
                 return
             add_count(user_id, group_id, 1, user_name)
             add_total_count(group_id, 1)
+            count = get_total_count(group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"報名成功，累計人數 {count} 人"))
         else:
             if n > 0:
                 add_count(user_id, group_id, n, user_name)
                 add_total_count(group_id, n)
-        count = get_total_count(group_id)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
+            count = get_total_count(group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
 
     if text.startswith("-"):
