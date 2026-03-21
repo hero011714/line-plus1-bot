@@ -441,25 +441,46 @@ def atomic_signup(user_id, group_id, name=""):
     if not cur:
         return False
     try:
-        cur.execute("SELECT expires_at FROM events WHERE group_id=%s FOR UPDATE", (group_id,))
+        now = int(time.time())
+        cur.execute("""
+            WITH event_check AS (
+                SELECT expires_at FROM events WHERE group_id=%s
+            ),
+            limit_check AS (
+                SELECT COALESCE((
+                    SELECT value::int FROM config
+                    WHERE group_id='default' AND key='signup_limit'
+                ), 12) AS lim
+            ),
+            count_check AS (
+                SELECT COUNT(*)::int AS cnt FROM signups WHERE group_id=%s
+            ),
+            decision AS (
+                SELECT
+                    (SELECT expires_at FROM event_check) AS expires_at,
+                    (SELECT lim FROM limit_check) AS lim,
+                    (SELECT cnt FROM count_check) AS cnt
+            )
+            SELECT
+                CASE
+                    WHEN (SELECT expires_at FROM decision) IS NULL THEN 'no_event'
+                    WHEN (SELECT expires_at FROM decision) <= %s THEN 'expired'
+                    WHEN (SELECT cnt FROM decision) >= (SELECT lim FROM decision) THEN 'full'
+                    ELSE 'ok'
+                END AS result
+        """, (group_id, group_id, now))
         result = cur.fetchone()
-        if not result or result[0] <= int(time.time()):
-            return False
-        cur.execute("SELECT COUNT(*) FROM signups WHERE group_id=%s", (group_id,))
-        count = cur.fetchone()[0]
-        cur.execute("SELECT value FROM config WHERE group_id='default' AND key='signup_limit'")
-        limit_res = cur.fetchone()
-        limit = int(limit_res[0]) if limit_res else 12
-        if count >= limit:
+        if not result or result[0] != 'ok':
             return False
         cur.execute("""
             INSERT INTO signups (user_id, group_id, name, signup_time)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (user_id, group_id)
             DO UPDATE SET name = EXCLUDED.name
-        """, (user_id, group_id, name, int(time.time())))
+        """, (user_id, group_id, name, now))
         return True
-    except:
+    except Exception as e:
+        print(f"atomic_signup error: {e}")
         return False
 
 def get_mentioned_users(event, exclude_id=None):
