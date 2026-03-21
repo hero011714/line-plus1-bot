@@ -388,13 +388,6 @@ def coach_open_event(user_id, group_id, user_name):
         return 0
     cur = conn_local.cursor()
     try:
-        cur.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name='events' AND column_name='total_count'
-        """)
-        if not cur.fetchone():
-            cur.execute("ALTER TABLE events ADD COLUMN total_count INTEGER DEFAULT 0")
-        
         now = int(time.time())
         expires = now + 48 * 3600
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
@@ -867,7 +860,7 @@ def handle_message(event):
         
         if target_user_id:
             clear_user(target_user_id, group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"收到~ 累計 0 次"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 0 人"))
         else:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
         return
@@ -897,12 +890,15 @@ def handle_message(event):
                     if not is_signed_up(target_user_id, group_id):
                         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
                         return
-                    
+                    limit = get_signup_limit(group_id)
+                    current_total = get_total_count(group_id)
+                    if current_total + n > limit:
+                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 累計人數已達上限（{current_total}/{limit}）"))
+                        return
                     add_count(target_user_id, group_id, n)
                     add_total_count(group_id, n)
                     new_count = get_total_count(group_id)
                     line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
-                    return
                     return
 
     signup_prefixes = ["今天打球", "明天打球"]
@@ -971,7 +967,9 @@ def handle_message(event):
                     ON CONFLICT (user_id, group_id) 
                     DO UPDATE SET count = GREATEST(users.count - %s, 0)
                 """, (user_id, group_id, n))
-                add_total_count(group_id, -n)
+                cur.execute("""
+                    UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id = %s
+                """, (n, group_id))
             count = get_total_count(group_id)
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         except Exception as e:
