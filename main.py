@@ -303,6 +303,7 @@ def clear_all_users(group_id):
         return
     try:
         cur.execute("UPDATE users SET count=0 WHERE group_id=%s", (group_id,))
+        cur.execute("UPDATE events SET total_count=0 WHERE group_id=%s", (group_id,))
     except:
         pass
 
