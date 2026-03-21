@@ -555,7 +555,9 @@ async def callback(request: Request):
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
-    text = event.message.text.strip()
+    raw_text = event.message.text
+    text = raw_text.strip()
+    print(f"[DEBUG] raw_text={repr(raw_text)}, stripped={repr(text)}")
     group_id = get_group_id(event)
     price = get_price(group_id)
     user_name = get_user_name(user_id, group_id)
