@@ -589,9 +589,8 @@ def handle_message(event):
     if text in ["幫助", "help"]:
         is_admin = (user_id == ADMIN_ID)
         msg = "📋 記帳機器人指令：\n\n"
-        msg += "【一般指令】\n"
-        msg += "今天打球+1 / 明天打球+1：開團\n\n"
-        msg += "【隊員指令】\n"
+        msg += "【指令】\n"
+        msg += "今天打球+1 / 明天打球+1：開團\n"
         msg += "+ 或 ++：+1 次（需先開團）\n"
         msg += "+N：+N 次（上限 10）\n"
         msg += "- 或 --：-1 次\n"
