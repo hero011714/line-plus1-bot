@@ -157,6 +157,20 @@ def get_max_per_action():
     except:
         return 10
 
+def get_event_duration():
+    cur = get_cursor()
+    if not cur:
+        return 30
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id='default' AND key='event_duration'")
+        result = cur.fetchone()
+        if result:
+            return int(result[0])
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'event_duration', '30')")
+        return 30
+    except:
+        return 30
+
 def set_price(group_id, price):
     cur = get_cursor()
     if not cur:
@@ -389,7 +403,7 @@ def coach_open_event(user_id, group_id, user_name):
     cur = conn_local.cursor()
     try:
         now = int(time.time())
-        expires = now + 30 * 3600
+        expires = now + get_event_duration() * 3600
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
         cur.execute("""
@@ -613,6 +627,7 @@ def handle_message(event):
             msg += "\n【管理員指令】\n"
             msg += "設定單價 [數字]\n"
             msg += "設定報名人數上限 [數字]\n"
+            msg += "設定活動時間 [小時]\n"
             msg += "白名單加入 @人\n"
             msg += "白名單移除 @人\n"
             msg += "白名單：查看白名單\n"
@@ -692,6 +707,17 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 報名人數上限已設定為 {new_limit} 人"))
         except:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：設定報名人數上限 數字"))
+        return
+
+    if text.startswith("設定活動時間") and user_id == ADMIN_ID:
+        try:
+            new_hours = int(text.split()[-1])
+            cur = get_cursor()
+            if cur:
+                cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'event_duration', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (str(new_hours), str(new_hours)))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 活動時間已設定為 {new_hours} 小時"))
+        except:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：設定活動時間 小時"))
         return
 
     if text == "重置全部" and user_id == ADMIN_ID:
