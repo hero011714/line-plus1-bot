@@ -538,7 +538,7 @@ def handle_message(event):
         for m in mentionees:
             m_idx = getattr(m, 'index', None)
             m_len = getattr(m, 'length', None)
-            if m_idx is not None and m_len is not None and m_idx >= 0 and m_idx + m_len <= len(text):
+            if m_idx is not None and m_len is not None and m_idx >= 0 and m_len > 0 and m_idx + m_len <= len(text):
                 text = text[:m_idx] + text[m_idx + m_len:]
     text = text.strip()
     
@@ -739,15 +739,12 @@ def handle_message(event):
         return
 
     if user_id == ADMIN_ID and text.startswith("+"):
-        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        is_private = group_id.startswith('private_')
-        if mentioned and not is_private:
-            target_user_id, target_name = mentioned[0]
-        elif is_private:
-            target_user_id = user_id
-            target_name = user_name
-        else:
+        if group_id.startswith('private_'):
             return
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+        if not mentioned:
+            return
+        target_user_id, target_name = mentioned[0]
         
         if text == "+":
             n = 1
@@ -784,6 +781,7 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
+        print(f"[+] text={repr(text)} group_id={repr(group_id)} event_active={is_event_active(group_id)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
