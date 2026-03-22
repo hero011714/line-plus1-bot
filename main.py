@@ -883,17 +883,17 @@ def handle_message(event):
         if n <= 0:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、-5）"))
             return
+        current_count = get_count(user_id, group_id)
+        if n > current_count:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 次數不足，目前最多可扣 {current_count} 次"))
+            return
         cur = get_cursor()
         if cur:
-            cur.execute("""
-                INSERT INTO users (user_id, group_id, count, last_fetch)
-                VALUES (%s, %s, 0, 0)
-                ON CONFLICT (user_id, group_id) 
-                DO UPDATE SET count = GREATEST(users.count - %s, 0)
-            """, (user_id, group_id, n))
-            cur.execute("""
-                UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id = %s
-            """, (n, group_id))
+            cur.execute("UPDATE users SET count = count - %s WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+            cur.execute("UPDATE events SET total_count = total_count - %s WHERE group_id=%s", (n, group_id))
         count = get_total_count(group_id)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
+        if current_count - n == 0:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"本次不報名，累計人數 {count} 人"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
