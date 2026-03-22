@@ -821,13 +821,12 @@ def handle_message(event):
         if not cur:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
             return
-        bot_uid = get_bot_user_id()
         cur.execute("""
             SELECT u.user_id, u.name, u.count, u.group_id
             FROM users u
-            WHERE u.count > 0 AND u.user_id != %s
+            WHERE u.count > 0
             ORDER BY u.group_id, u.count DESC
-        """, (bot_uid,))
+        """)
         rows = cur.fetchall()
         
         msg = "📋 全部帳單（跨所有群組）：\n\n"
