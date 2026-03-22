@@ -509,6 +509,8 @@ def get_mentioned_users(event, exclude_id=None):
     return mentioned, group_id
 
 def strip_mentions(text, event):
+    if text.startswith(('+', '-')):
+        return text
     mention = getattr(event.message, 'mention', None)
     if mention and hasattr(mention, 'mentionees'):
         mentionees = list(mention.mentionees)
@@ -517,10 +519,7 @@ def strip_mentions(text, event):
             m_idx = getattr(m, 'index', None)
             m_len = getattr(m, 'length', None)
             if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
-                stripped = text[:m_idx] + text[m_idx + m_len:]
-                if stripped and stripped[0] in '+-':
-                    continue
-                text = stripped
+                text = text[:m_idx] + text[m_idx + m_len:]
     return text.strip()
 
 @app.get("/")
@@ -565,18 +564,16 @@ def handle_message(event):
     reply_token = event.reply_token
     source_type = event.source.type
 
-    mention = getattr(event.message, 'mention', None)
-    if mention and hasattr(mention, 'mentionees'):
-        mentionees = list(mention.mentionees)
-        mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
-        for m in mentionees:
-            m_idx = getattr(m, 'index', None)
-            m_len = getattr(m, 'length', None)
-            if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
-                stripped = text[:m_idx] + text[m_idx + m_len:]
-                if stripped and stripped[0] in '+-':
-                    continue
-                text = stripped
+    if not text.startswith(('+', '-')):
+        mention = getattr(event.message, 'mention', None)
+        if mention and hasattr(mention, 'mentionees'):
+            mentionees = list(mention.mentionees)
+            mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
+            for m in mentionees:
+                m_idx = getattr(m, 'index', None)
+                m_len = getattr(m, 'length', None)
+                if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
+                    text = text[:m_idx] + text[m_idx + m_len:]
     text = text.strip()
     print(f"[MSG] raw={repr(event.message.text)} stripped={repr(text)}")
     
