@@ -572,6 +572,14 @@ def handle_message(event):
                 after_mention = after_mention.strip()
                 if after_mention.startswith('+'):
                     target_user_id = non_bot_mentionees[0].user_id
+                    # Extract name from mention text (e.g. @阿綠 +1 -> 阿綠)
+                    m_idx = getattr(non_bot_mentionees[0], 'index', None)
+                    m_len = getattr(non_bot_mentionees[0], 'length', None)
+                    if m_idx is not None and m_len is not None:
+                        mention_text = original_text[m_idx:m_idx + m_len].strip()
+                        mention_name = mention_text.lstrip('@').strip()
+                    else:
+                        mention_name = None
                     target_name = get_user_name(target_user_id, group_id)
                     # Fetch target profile if needed
                     if should_fetch_profile(target_user_id, group_id):
@@ -581,6 +589,9 @@ def handle_message(event):
                             add_user(target_user_id, group_id, target_name)
                             update_user_name(target_user_id, group_id, target_name)
                         except:
+                            # LINE API failed, use name from mention text
+                            if mention_name:
+                                target_name = mention_name
                             add_user(target_user_id, group_id, target_name)
                     else:
                         add_user(target_user_id, group_id, target_name)
@@ -796,7 +807,10 @@ def handle_message(event):
         
         if target_user_id:
             clear_user(target_user_id, group_id)
-            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+            if not target_name:
+                target_name = target_user_id[-4:]
+            # For ID fragments (4 chars or less), don't add @ prefix
+            name_display = target_name if len(target_name) <= 4 else f"@{target_name}"
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已清除 {name_display} 的帳目（目前 0 次）"))
         else:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
@@ -807,12 +821,13 @@ def handle_message(event):
         if not cur:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
             return
+        bot_uid = get_bot_user_id()
         cur.execute("""
             SELECT u.user_id, u.name, u.count, u.group_id
             FROM users u
-            WHERE u.count > 0
+            WHERE u.count > 0 AND u.user_id != %s
             ORDER BY u.group_id, u.count DESC
-        """)
+        """, (bot_uid,))
         rows = cur.fetchall()
         
         msg = "📋 全部帳單（跨所有群組）：\n\n"
@@ -852,11 +867,17 @@ def handle_message(event):
                         DO UPDATE SET name = EXCLUDED.name
                     """, (uid, gid, display_name))
                 except:
-                    display_name = uid[-4:]
+                    pass
+            if not display_name:
+                display_name = uid[-4:]
             cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
             price_row = cur.fetchone()
             group_price = int(price_row[0]) if price_row else 50
-            msg += f"  @{display_name}: {count}次 / {count*group_price}元\n"
+            # For ID fragments (4 chars or less), don't add @ prefix
+            if len(display_name) <= 4:
+                msg += f"  {display_name}: {count}次 / {count*group_price}元\n"
+            else:
+                msg += f"  @{display_name}: {count}次 / {count*group_price}元\n"
             has_debt = True
         if not has_debt:
             msg = "✅ 目前無欠款"
