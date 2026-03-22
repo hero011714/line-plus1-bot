@@ -1,4 +1,5 @@
 import os
+import re
 import psycopg2
 import asyncio
 import time
@@ -587,13 +588,11 @@ def handle_message(event):
     mention = getattr(event.message, 'mention', None)
     if mention and hasattr(mention, 'mentionees'):
         mentionees = list(mention.mentionees)
-        mentionees.sort(key=lambda m: getattr(m, 'start', 0), reverse=True)
         for m in mentionees:
-            start = getattr(m, 'start', None)
-            length = getattr(m, 'length', None)
-            if start is not None and length is not None:
-                text = text[:start] + text[start + length:]
-        text = text.strip()
+            uid = getattr(m, 'user_id', None)
+            if uid:
+                text = re.sub(r'@' + re.escape(uid), '', text)
+    text = re.sub(r'@[^@\s]+', '', text).strip()
     
     if should_fetch_profile(user_id, group_id):
         try:
@@ -908,6 +907,20 @@ def handle_message(event):
             
             if not target_user_id:
                 target_user_id = get_user_by_name(target_name, group_id)
+            
+            if not target_user_id:
+                raw = event.message.text
+                mention = getattr(event.message, 'mention', None)
+                if mention and hasattr(mention, 'mentionees'):
+                    for m in mention.mentionees:
+                        uid = getattr(m, 'user_id', None)
+                        if uid:
+                            raw = re.sub(r'@' + re.escape(uid), '', raw)
+                raw = re.sub(r'@\S+', '', raw).strip()
+                parts2 = raw.split()
+                if len(parts2) >= 2 and parts2[1].startswith("+"):
+                    target_name = parts2[0].replace("@", "")
+                    target_user_id = get_user_by_name(target_name, group_id)
             
             if not target_user_id:
                 line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ 找不到 @{target_name}，請先傳訊息讓機器人學習"))
