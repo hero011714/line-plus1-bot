@@ -583,13 +583,7 @@ async def callback(request: Request):
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
-    raw_text = event.message.text
-    text = raw_text.strip()
-    mention = getattr(event.message, 'mention', None)
-    mention_info = None
-    if mention and hasattr(mention, 'mentionees'):
-        mention_info = [(getattr(m, 'user_id', None), getattr(m, 'index', None), getattr(m, 'length', None)) for m in mention.mentionees]
-    print(f"[MSG] raw={repr(raw_text)}, stripped={repr(text)}, mention_info={mention_info}")
+    text = event.message.text.strip()
     group_id = get_group_id(event)
     price = get_price(group_id)
     user_name = get_user_name(user_id, group_id)
@@ -606,7 +600,6 @@ def handle_message(event):
             if m_idx is not None and m_len is not None and m_idx >= 0 and m_idx + m_len <= len(text):
                 text = text[:m_idx] + text[m_idx + m_len:]
     text = text.strip()
-    print(f"[AFTER STRIP] text={repr(text)}")
     
     if should_fetch_profile(user_id, group_id):
         try:
@@ -618,9 +611,6 @@ def handle_message(event):
             add_user(user_id, group_id, user_name)
     else:
         add_user(user_id, group_id, user_name)
-
-    if is_whitelist(user_id, group_id):
-        return
 
     if text in ["幫助", "help"]:
         is_admin = (user_id == ADMIN_ID)
@@ -819,7 +809,6 @@ def handle_message(event):
         return
 
     if text == "查帳":
-        print(f"[查帳] triggered, text={repr(text)}, group_id={repr(group_id)}")
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="尚無資料"))
             return
@@ -954,7 +943,6 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
-        print(f"[DEBUG +] text={repr(text)}, group_id={repr(group_id)}, event_active={is_event_active(group_id)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
@@ -1027,5 +1015,4 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
 
-    print(f"[DEBUG unknown] text={repr(text)}")
     line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 指令錯誤，請輸入「幫助」查看指令列表"))
