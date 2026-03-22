@@ -16,6 +16,24 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
+_bot_user_id = None
+
+def get_bot_user_id():
+    global _bot_user_id
+    if _bot_user_id:
+        return _bot_user_id
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            "https://api.line.me/v2/profile",
+            headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            _bot_user_id = resp.json().get("userId")
+    except:
+        pass
+    return _bot_user_id
 
 app = FastAPI()
 
@@ -472,9 +490,10 @@ def get_mentioned_users(event, exclude_id=None):
     mentioned = []
     group_id = get_group_id(event)
     mention = getattr(event.message, 'mention', None)
+    bot_uid = get_bot_user_id()
     if mention and hasattr(mention, 'mentionees'):
         for m in mention.mentionees:
-            if m.user_id and m.user_id != exclude_id:
+            if m.user_id and m.user_id != exclude_id and m.user_id != bot_uid:
                 name = get_user_name(m.user_id, group_id)
                 try:
                     if should_fetch_profile(m.user_id, group_id):
@@ -496,6 +515,11 @@ async def health_check():
 @app.head("/")
 async def health_check_head():
     return "OK"
+
+@app.get("/me")
+async def bot_me():
+    uid = get_bot_user_id()
+    return {"bot_user_id": uid}
 
 @app.head("/callback")
 async def callback_head():
