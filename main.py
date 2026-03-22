@@ -983,6 +983,9 @@ def handle_message(event):
         return
 
     if text.startswith("-"):
+        if not is_event_active(group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="⚠️ 活動尚未開始或已結束"))
+            return
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「+1」報到"))
             return
