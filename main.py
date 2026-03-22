@@ -508,6 +508,21 @@ def get_mentioned_users(event, exclude_id=None):
                 mentioned.append((m.user_id, name))
     return mentioned, group_id
 
+def strip_mentions(text, event):
+    mention = getattr(event.message, 'mention', None)
+    if mention and hasattr(mention, 'mentionees'):
+        mentionees = list(mention.mentionees)
+        mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
+        for m in mentionees:
+            m_idx = getattr(m, 'index', None)
+            m_len = getattr(m, 'length', None)
+            if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
+                stripped = text[:m_idx] + text[m_idx + m_len:]
+                if stripped and stripped[0] in '+-':
+                    continue
+                text = stripped
+    return text.strip()
+
 @app.get("/")
 async def health_check():
     return "OK"
@@ -557,9 +572,13 @@ def handle_message(event):
         for m in mentionees:
             m_idx = getattr(m, 'index', None)
             m_len = getattr(m, 'length', None)
-            if m_idx is not None and m_len is not None and m_idx >= 0 and m_len > 0 and m_idx + m_len <= len(text):
-                text = text[:m_idx] + text[m_idx + m_len:]
+            if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
+                stripped = text[:m_idx] + text[m_idx + m_len:]
+                if stripped and stripped[0] in '+-':
+                    continue
+                text = stripped
     text = text.strip()
+    print(f"[MSG] raw={repr(event.message.text)} stripped={repr(text)}")
     
     if should_fetch_profile(user_id, group_id):
         try:
@@ -815,6 +834,7 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
+        print(f"[PLUS] text={repr(text)} group={repr(group_id)} active={is_event_active(group_id)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
