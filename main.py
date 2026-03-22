@@ -745,6 +745,7 @@ def handle_message(event):
         msg += "+ / +N：報名（最多 10 次）\n"
         msg += "- / -N：扣次數\n"
         msg += "查帳：查看自己的帳目\n"
+        msg += "名單：查看本次報名名單\n"
         if is_admin:
             msg += "\n【管理員指令】\n"
             msg += "設定單價 [數字]\n"
@@ -1036,6 +1037,39 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 0 元（年繳會員）"))
         else:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
+        return
+
+    if text == "名單":
+        cur = get_cursor()
+        if not cur:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
+            return
+        cur.execute("""
+            SELECT user_id, name, count
+            FROM users
+            WHERE group_id = %s AND count > 0
+            ORDER BY count DESC
+        """, (group_id,))
+        rows = cur.fetchall()
+        
+        if not rows:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="📋 目前無人報名"))
+            return
+        
+        total_count = sum(r[2] for r in rows)
+        limit = get_signup_limit(group_id)
+        msg = "🏀 打球名單：\n\n"
+        for idx, (uid, name, count) in enumerate(rows, 1):
+            # Get display name
+            if not name:
+                name = uid[-4:]
+            display_name = name if len(name) > 4 else name
+            prefix = "" if len(name) > 4 else ""
+            member_tag = " [年繳]" if is_yearly_member(uid, group_id) else ""
+            msg += f"{idx}. @{display_name} ({count}人){member_tag}\n"
+        msg += "----------------------\n"
+        msg += f"👥 報名：{total_count} 人 / 上限：{limit} 人"
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
     signup_prefixes = ["今天打球", "明天打球"]
