@@ -588,11 +588,18 @@ def handle_message(event):
     mention = getattr(event.message, 'mention', None)
     if mention and hasattr(mention, 'mentionees'):
         mentionees = list(mention.mentionees)
+        mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
         for m in mentionees:
             uid = getattr(m, 'user_id', None)
             if uid:
                 text = re.sub(r'@' + re.escape(uid), '', text)
-    text = re.sub(r'@[^@\s]+', '', text).strip()
+            m_len = getattr(m, 'length', None)
+            m_idx = getattr(m, 'index', None)
+            if m_idx is not None and m_len is not None:
+                text = text[:m_idx] + text[m_idx + m_len:]
+    text = re.sub(r'@[^\s@]+', '', text).strip()
+    while '  ' in text:
+        text = text.replace('  ', ' ')
     
     if should_fetch_profile(user_id, group_id):
         try:
