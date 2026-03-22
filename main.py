@@ -5,7 +5,7 @@ import time
 import psutil
 from fastapi import FastAPI, Request
 from linebot import LineBotApi, WebhookHandler
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, JoinEvent
 from linebot.exceptions import InvalidSignatureError
 
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET", "")
@@ -550,6 +550,14 @@ def get_mentioned_users(event, exclude_id=None):
 async def health_check():
     return "OK"
 
+@handler.add(JoinEvent)
+def handle_join(event):
+    reply_token = event.reply_token
+    msg = """大家好！我是記帳機器人，專門用來管理球場活動報名和記帳。
+
+有任何問題請輸入「幫助」查看完整指令列表！"""
+    line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+
 @app.post("/callback")
 async def callback(request: Request):
     body = await request.body()
@@ -578,19 +586,14 @@ def handle_message(event):
 
     mention = getattr(event.message, 'mention', None)
     if mention and hasattr(mention, 'mentionees'):
-        for m in mention.mentionees:
-            if m.user_id:
-                tag = f"@{m.user_id}"
-                if text.startswith(tag):
-                    text = text[len(tag):].strip()
-                    break
-                try:
-                    length = getattr(m, 'length', None)
-                    if length:
-                        text = text[length:].strip()
-                        break
-                except:
-                    pass
+        mentionees = list(mention.mentionees)
+        mentionees.sort(key=lambda m: getattr(m, 'start', 0), reverse=True)
+        for m in mentionees:
+            start = getattr(m, 'start', None)
+            length = getattr(m, 'length', None)
+            if start is not None and length is not None:
+                text = text[:start] + text[start + length:]
+        text = text.strip()
     
     if should_fetch_profile(user_id, group_id):
         try:
