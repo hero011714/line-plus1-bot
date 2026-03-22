@@ -893,36 +893,42 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
         return
 
-    if user_id == ADMIN_ID:
+    if user_id == ADMIN_ID and text.startswith("+"):
         mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        if mentioned and text.startswith("+"):
+        is_private = group_id.startswith('private_')
+        if mentioned and not is_private:
             target_user_id, target_name = mentioned[0]
-            
-            if text == "+":
-                n = 1
-            else:
-                try:
-                    n = int(text.lstrip("+"))
-                except:
-                    n = 0
-            
-            if n > 0:
-                if is_whitelist(target_user_id, group_id):
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 在白名單中，無法記錄"))
-                    return
-                if not is_signed_up(target_user_id, group_id):
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
-                    return
-                limit = get_signup_limit(group_id)
-                current_total = get_total_count(group_id)
-                if current_total + n > limit:
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
-                    return
-                add_count(target_user_id, group_id, n)
-                add_total_count(group_id, n)
-                new_count = get_total_count(group_id)
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
+        elif is_private:
+            target_user_id = user_id
+            target_name = user_name
+        else:
+            return
+        
+        if text == "+":
+            n = 1
+        else:
+            try:
+                n = int(text.lstrip("+"))
+            except:
+                n = 0
+        
+        if n > 0:
+            if is_whitelist(target_user_id, group_id):
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 在白名單中，無法記錄"))
                 return
+            if not is_signed_up(target_user_id, group_id):
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
+                return
+            limit = get_signup_limit(group_id)
+            current_total = get_total_count(group_id)
+            if current_total + n > limit:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
+                return
+            add_count(target_user_id, group_id, n)
+            add_total_count(group_id, n)
+            new_count = get_total_count(group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
+            return
 
     signup_prefixes = ["今天打球", "明天打球"]
     for prefix in signup_prefixes:
