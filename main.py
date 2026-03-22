@@ -568,10 +568,25 @@ def handle_message(event):
             msg += "設定活動時間 [小時]\n"
             msg += "@人 +N：替他人記錄（教練）\n"
             msg += "重置全部：清除所有紀錄資料\n"
+            msg += "活動結束：提早結束活動\n"
             msg += "全部帳單：查看所有群組的欠款\n"
             msg += "退出群組：清除資料並退出\n"
             msg += "狀態：查看系統狀態"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
+    if text == "活動結束" and user_id == ADMIN_ID:
+        if not is_event_active(group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="目前沒有進行中的活動"))
+            return
+        cur = get_cursor()
+        if cur:
+            try:
+                cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
+                cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+            except:
+                pass
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 活動已結束"))
         return
 
     if text == "狀態" and user_id == ADMIN_ID:
