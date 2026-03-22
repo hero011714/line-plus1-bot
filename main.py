@@ -552,6 +552,10 @@ def get_mentioned_users(event, exclude_id=None):
 async def health_check():
     return "OK"
 
+@app.head("/callback")
+async def callback_head():
+    return ""
+
 @handler.add(JoinEvent)
 def handle_join(event):
     reply_token = event.reply_token
