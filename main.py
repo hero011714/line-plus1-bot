@@ -942,6 +942,7 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
+        print(f"[DEBUG +] text={repr(text)}, group_id={repr(group_id)}, event_active={is_event_active(group_id)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
@@ -1014,4 +1015,5 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {count} 人"))
         return
 
+    print(f"[DEBUG unknown] text={repr(text)}")
     line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 指令錯誤，請輸入「幫助」查看指令列表"))
