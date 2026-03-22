@@ -660,6 +660,7 @@ def handle_message(event):
             msg += "設定報名人數上限 [數字]\n"
             msg += "設定活動時間 [小時]\n"
             msg += "@人 +N：替他人記錄（教練）\n"
+            msg += "已繳 @人：清除用戶帳目（繳費確認）\n"
             msg += "重置全部：清除所有紀錄資料\n"
             msg += "活動結束：提早結束活動\n"
             msg += "全部帳單：查看所有群組的欠款\n"
@@ -771,6 +772,34 @@ def handle_message(event):
             except:
                 pass
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 活動已結束"))
+        return
+
+    if text.startswith("已繳") and user_id == ADMIN_ID:
+        target_user_id = None
+        target_name = None
+        
+        # Try to get target from mention
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        
+        # If no mention, try to find by name
+        if not target_user_id:
+            parts = text.replace("已繳", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
+        
+        if target_user_id:
+            clear_user(target_user_id, group_id)
+            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已清除 {name_display} 的帳目（目前 0 次）"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
         return
 
     if text == "全部帳單" and user_id == ADMIN_ID:
