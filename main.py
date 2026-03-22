@@ -555,14 +555,14 @@ def handle_message(event):
     reply_token = event.reply_token
     source_type = event.source.type
 
-    # @人 +N: admin shortcut, check BEFORE mention stripping
+    # @人 +N / @人 -N: admin shortcut, check BEFORE mention stripping
     if user_id == ADMIN_ID and source_type == 'group':
         mention = getattr(event.message, 'mention', None)
         if mention and hasattr(mention, 'mentionees'):
             non_bot_mentionees = [m for m in mention.mentionees
                                   if getattr(m, 'user_id', None) and m.user_id != get_bot_user_id()]
             if non_bot_mentionees:
-                # Check if +N follows the mention
+                # Check if +/-N follows the mention
                 after_mention = original_text
                 for m in reversed(non_bot_mentionees):
                     idx = getattr(m, 'index', None)
@@ -570,32 +570,33 @@ def handle_message(event):
                     if idx is not None and length is not None:
                         after_mention = after_mention[:idx] + after_mention[idx + length:]
                 after_mention = after_mention.strip()
-                if after_mention.startswith('+'):
-                    target_user_id = non_bot_mentionees[0].user_id
-                    # Extract name from mention text (e.g. @阿綠 +1 -> 阿綠)
-                    m_idx = getattr(non_bot_mentionees[0], 'index', None)
-                    m_len = getattr(non_bot_mentionees[0], 'length', None)
-                    if m_idx is not None and m_len is not None:
-                        mention_text = original_text[m_idx:m_idx + m_len].strip()
-                        mention_name = mention_text.lstrip('@').strip()
-                    else:
-                        mention_name = None
-                    target_name = get_user_name(target_user_id, group_id)
-                    # Fetch target profile if needed
-                    if should_fetch_profile(target_user_id, group_id):
-                        try:
-                            profile = line_bot_api.get_profile(target_user_id)
-                            target_name = profile.display_name
-                            add_user(target_user_id, group_id, target_name)
-                            update_user_name(target_user_id, group_id, target_name)
-                        except:
-                            # LINE API failed, use name from mention text
-                            if mention_name:
-                                target_name = mention_name
-                            add_user(target_user_id, group_id, target_name)
-                    else:
+                
+                # Extract target info
+                target_user_id = non_bot_mentionees[0].user_id
+                m_idx = getattr(non_bot_mentionees[0], 'index', None)
+                m_len = getattr(non_bot_mentionees[0], 'length', None)
+                if m_idx is not None and m_len is not None:
+                    mention_text = original_text[m_idx:m_idx + m_len].strip()
+                    mention_name = mention_text.lstrip('@').strip()
+                else:
+                    mention_name = None
+                target_name = get_user_name(target_user_id, group_id)
+                # Fetch target profile if needed
+                if should_fetch_profile(target_user_id, group_id):
+                    try:
+                        profile = line_bot_api.get_profile(target_user_id)
+                        target_name = profile.display_name
                         add_user(target_user_id, group_id, target_name)
-                    # Parse N
+                        update_user_name(target_user_id, group_id, target_name)
+                    except:
+                        if mention_name:
+                            target_name = mention_name
+                        add_user(target_user_id, group_id, target_name)
+                else:
+                    add_user(target_user_id, group_id, target_name)
+                
+                # @人 +N
+                if after_mention.startswith('+'):
                     if after_mention == '+':
                         n = 1
                     else:
@@ -612,7 +613,6 @@ def handle_message(event):
                         if current_total + n > limit:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
                             return
-                        # Auto sign up target if not signed up (equivalent to target doing +N)
                         first_signup = not is_signed_up(target_user_id, group_id)
                         if first_signup:
                             signed_up = atomic_signup(target_user_id, group_id, target_name)
@@ -625,6 +625,38 @@ def handle_message(event):
                         new_count = get_total_count(group_id)
                         if first_signup:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"報名成功（@{target_name}），累計人數 {new_count} 人"))
+                        else:
+                            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
+                        return
+                
+                # @人 -N
+                if after_mention.startswith('-'):
+                    if after_mention == '-':
+                        n = 1
+                    else:
+                        try:
+                            n = int(after_mention.lstrip('-'))
+                        except:
+                            n = 0
+                    if n > 0:
+                        if not is_event_active(group_id):
+                            line_bot_api.reply_message(reply_token, TextSendMessage(text="⚠️ 活動尚未開始或已結束"))
+                            return
+                        if not is_signed_up(target_user_id, group_id):
+                            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+                            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"{name_display} 尚未報到"))
+                            return
+                        current_count = get_count(target_user_id, group_id)
+                        if n > current_count:
+                            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 次數不足，@{target_name} 目前最多可扣 {current_count} 次"))
+                            return
+                        cur = get_cursor()
+                        if cur:
+                            cur.execute("UPDATE users SET count = count - %s WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
+                            cur.execute("UPDATE events SET total_count = total_count - %s WHERE group_id=%s", (n, group_id))
+                        new_count = get_total_count(group_id)
+                        if current_count - n == 0:
+                            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"本次不報名（@{target_name}），累計人數 {new_count} 人"))
                         else:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
                         return
@@ -670,7 +702,7 @@ def handle_message(event):
             msg += "設定單價 [數字]\n"
             msg += "設定報名人數上限 [數字]\n"
             msg += "設定活動時間 [小時]\n"
-            msg += "@人 +N：替他人記錄（教練）\n"
+            msg += "@人 +N / -N：替他人記錄（教練）\n"
             msg += "已繳 @人：清除用戶帳目（繳費確認）\n"
             msg += "重置全部：清除所有紀錄資料\n"
             msg += "活動結束：提早結束活動\n"
