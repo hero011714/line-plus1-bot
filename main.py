@@ -63,14 +63,6 @@ def init_tables():
             )
         """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS whitelist (
-                user_id TEXT NOT NULL,
-                group_id TEXT NOT NULL,
-                name TEXT DEFAULT '',
-                PRIMARY KEY (user_id, group_id)
-            )
-        """)
-        cur.execute("""
             CREATE TABLE IF NOT EXISTS signups (
                 user_id TEXT NOT NULL,
                 group_id TEXT NOT NULL,
@@ -125,7 +117,6 @@ def clear_group_data(group_id):
     if not cur:
         return
     try:
-        cur.execute("DELETE FROM whitelist WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
@@ -228,55 +219,9 @@ def get_user_name(user_id, group_id):
         result = cur.fetchone()
         if result and result[0]:
             return result[0]
-        cur.execute("SELECT name FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-        result2 = cur.fetchone()
-        if result2 and result2[0]:
-            return result2[0]
         return user_id[-4:]
     except:
         return user_id[-4:]
-
-def is_whitelist(user_id, group_id):
-    cur = get_cursor()
-    if not cur:
-        return False
-    try:
-        cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-        return cur.fetchone() is not None
-    except:
-        return False
-
-def add_to_whitelist(user_id, group_id, name=""):
-    old_count = get_count(user_id, group_id)
-    cur = get_cursor()
-    if not cur:
-        return old_count
-    try:
-        cur.execute("INSERT INTO whitelist (user_id, group_id, name) VALUES (%s, %s, %s) ON CONFLICT (user_id, group_id) DO UPDATE SET name = %s", (user_id, group_id, name, name))
-        cur.execute("UPDATE users SET count=0 WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-        cur.execute("DELETE FROM signups WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    except:
-        pass
-    return old_count
-
-def remove_from_whitelist(user_id, group_id):
-    cur = get_cursor()
-    if not cur:
-        return
-    try:
-        cur.execute("DELETE FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
-    except:
-        pass
-
-def get_whitelist(group_id):
-    cur = get_cursor()
-    if not cur:
-        return []
-    try:
-        cur.execute("SELECT user_id, name FROM whitelist WHERE group_id=%s", (group_id,))
-        return cur.fetchall()
-    except:
-        return []
 
 def add_count(user_id, group_id, n=1, name=""):
     cur = get_cursor()
@@ -342,24 +287,20 @@ def get_user_by_name(name, group_id):
         result = cur.fetchone()
         if result:
             return result[0]
-        cur.execute("SELECT user_id FROM whitelist WHERE name=%s AND group_id=%s", (name, group_id))
-        result2 = cur.fetchone()
-        return result2[0] if result2 else None
+        return None
     except:
         return None
 
 def get_group_stats(group_id):
     cur = get_cursor()
     if not cur:
-        return 0, 0
+        return 0
     try:
         cur.execute("SELECT COUNT(*) FROM users WHERE group_id=%s", (group_id,))
         user_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM whitelist WHERE group_id=%s", (group_id,))
-        whitelist_count = cur.fetchone()[0]
-        return user_count, whitelist_count
+        return user_count
     except:
-        return 0, 0
+        return 0
 
 def get_signup_limit(group_id):
     cur = get_cursor()
@@ -625,10 +566,6 @@ def handle_message(event):
             msg += "設定單價 [數字]\n"
             msg += "設定報名人數上限 [數字]\n"
             msg += "設定活動時間 [小時]\n"
-            msg += "白名單加入 @人\n"
-            msg += "白名單移除 @人\n"
-            msg += "白名單：查看白名單\n"
-            msg += "已繳 @人：清除帳目\n"
             msg += "@人 +N：替他人記錄（教練）\n"
             msg += "重置全部：清除所有紀錄資料\n"
             msg += "全部帳單：查看所有群組的欠款\n"
@@ -640,7 +577,7 @@ def handle_message(event):
     if text == "狀態" and user_id == ADMIN_ID:
         try:
             cur = get_cursor()
-            user_count, whitelist_count = get_group_stats(group_id)
+            user_count = get_group_stats(group_id)
             
             msg = "📊 系統狀態：\n\n"
             db_size_mb = 0
@@ -667,7 +604,6 @@ def handle_message(event):
                 msg += f"   活動：未開啟\n"
             msg += f"   報名人數：{signup_count} / {get_signup_limit(group_id)} 人\n"
             msg += f"   登記用戶：{user_count} 人\n"
-            msg += f"   白名單：{whitelist_count} 人\n"
             msg += f"   目前單價：{price} 元"
             
             if db_size_mb > 900:
@@ -750,9 +686,6 @@ def handle_message(event):
         has_debt = False
         current_gid = None
         for uid, name, count, gid in rows:
-            cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (uid, gid))
-            if cur.fetchone():
-                continue
             if gid != current_gid:
                 current_gid = gid
                 if gid.startswith('private_'):
@@ -797,101 +730,12 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
-    if text == "白名單" and user_id == ADMIN_ID:
-        rows = get_whitelist(group_id)
-        if rows:
-            msg = "📋 白名單：\n"
-            for uid, name in rows:
-                msg += f"✅ @{name}\n"
-        else:
-            msg = "📋 白名單是空的"
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
-        return
-
     if text == "查帳":
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="尚無資料"))
             return
         count = get_count(user_id, group_id)
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
-        return
-
-    if text.startswith("白名單加入") and user_id == ADMIN_ID:
-        target_user_id = None
-        target_name = None
-        
-        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        for m_user_id, m_name in mentioned:
-            target_user_id = m_user_id
-            target_name = m_name
-            break
-        
-        if not target_user_id:
-            parts = text.replace("白名單加入", "").strip()
-            if parts.startswith("@"):
-                parts = parts[1:]
-            if parts:
-                target_user_id = get_user_by_name(parts, group_id)
-                target_name = parts
-        
-        if target_user_id:
-            old_count = add_to_whitelist(target_user_id, group_id, target_name or "")
-            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
-            msg = f"✅ 已將 {name_display} 加入白名單"
-            if old_count > 0:
-                msg += f"\n（已清除 {old_count} 次帳目）"
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「白名單加入 @人」格式"))
-        return
-
-    if text.startswith("白名單移除") and user_id == ADMIN_ID:
-        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        target_user_id = None
-        target_name = None
-        for m_user_id, m_name in mentioned:
-            target_user_id = m_user_id
-            target_name = m_name
-            break
-        
-        if not target_user_id:
-            parts = text.replace("白名單移除", "").strip()
-            if parts.startswith("@"):
-                parts = parts[1:]
-            if parts:
-                target_user_id = get_user_by_name(parts, group_id)
-                target_name = parts
-        
-        if target_user_id:
-            remove_from_whitelist(target_user_id, group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 @{target_name} 移出白名單"))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「白名單移除 @人」格式"))
-        return
-
-    if text.startswith("已繳") and user_id == ADMIN_ID:
-        target_user_id = None
-        target_name = None
-        
-        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        for m_user_id, m_name in mentioned:
-            target_user_id = m_user_id
-            target_name = m_name
-            break
-        
-        if not target_user_id:
-            parts = text.replace("已繳", "").strip()
-            if parts.startswith("@"):
-                parts = parts[1:]
-            if parts:
-                target_user_id = get_user_by_name(parts, group_id)
-                target_name = parts
-        
-        if target_user_id:
-            clear_user(target_user_id, group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 0 人"))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
         return
 
     if user_id == ADMIN_ID and text.startswith("+"):
@@ -914,9 +758,6 @@ def handle_message(event):
                 n = 0
         
         if n > 0:
-            if is_whitelist(target_user_id, group_id):
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 在白名單中，無法記錄"))
-                return
             if not is_signed_up(target_user_id, group_id):
                 line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
                 return
