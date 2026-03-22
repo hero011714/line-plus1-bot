@@ -627,7 +627,7 @@ def handle_message(event):
         msg = "📋 記帳機器人指令：\n\n"
         msg += "【指令】\n"
         msg += "今天打球+1 / 明天打球+1：開團\n"
-        msg += "+ / +N：報名（需先開團，最多 10 次）\n"
+        msg += "+ / +N：報名（最多 10 次）\n"
         msg += "- / -N：扣次數\n"
         msg += "查帳：查看自己的帳目\n"
         if is_admin:
