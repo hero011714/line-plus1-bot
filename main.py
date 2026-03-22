@@ -556,13 +556,18 @@ async def callback(request: Request):
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    print(f"[START] entering handle_message")
     user_id = event.source.user_id
+    print(f"[STEP1] user_id={user_id[:10]}")
     text = event.message.text.strip()
+    print(f"[STEP2] text={repr(text)}")
     group_id = get_group_id(event)
+    print(f"[STEP3] group_id={group_id[:20] if group_id else None}")
     price = get_price(group_id)
     user_name = get_user_name(user_id, group_id)
     reply_token = event.reply_token
     source_type = event.source.type
+    print(f"[STEP4] setup done, checking mention")
 
     if not text.startswith(('+', '-')):
         mention = getattr(event.message, 'mention', None)
