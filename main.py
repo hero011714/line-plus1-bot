@@ -516,7 +516,9 @@ async def callback(request: Request):
     except InvalidSignatureError:
         return "Invalid signature"
     except Exception as e:
+        import traceback
         print(f"Error: {e}")
+        traceback.print_exc()
         return "Error"
 
     return "OK"
@@ -531,6 +533,7 @@ def handle_message(event):
     user_name = get_user_name(user_id, group_id)
     reply_token = event.reply_token
     source_type = event.source.type
+    print(f"[CHECK] text={repr(text)} at end of setup")
 
     mention = getattr(event.message, 'mention', None)
     if mention and hasattr(mention, 'mentionees'):
