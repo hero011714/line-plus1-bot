@@ -3,6 +3,7 @@ import psycopg2
 import asyncio
 import time
 import psutil
+import requests
 from fastapi import FastAPI, Request
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -12,6 +13,8 @@ CHANNEL_SECRET = os.getenv("CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN", "")
 ADMIN_ID = os.getenv("ADMIN_ID", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+CRONJOB_API_KEY = os.getenv("CRONJOB_API_KEY", "")
+CRONJOB_JOB_ID = os.getenv("CRONJOB_JOB_ID", "")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -37,6 +40,18 @@ def get_cursor():
     if c:
         return c.cursor()
     return None
+
+def wake_bot():
+    if not CRONJOB_API_KEY or not CRONJOB_JOB_ID:
+        return
+    try:
+        requests.post(
+            f"https://cron-job.org/api/v1/jobs/{CRONJOB_JOB_ID}/execute",
+            headers={"Authorization": f"Bearer {CRONJOB_API_KEY}"},
+            timeout=5
+        )
+    except:
+        pass
 
 def init_tables():
     cur = get_cursor()
@@ -408,6 +423,7 @@ def coach_open_event(user_id, group_id, user_name):
         """, (user_id, group_id, user_name))
         cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
         result = cur.fetchone()
+        wake_bot()
         return result[0] if result else 1
     except Exception as e:
         print(f"coach_open_event error: {e}")
@@ -535,6 +551,11 @@ def get_mentioned_users(event, exclude_id=None):
 @app.get("/")
 async def health_check():
     return "OK"
+
+@app.get("/wake")
+async def wake():
+    wake_bot()
+    return "WOKE"
 
 @app.post("/callback")
 async def callback(request: Request):
