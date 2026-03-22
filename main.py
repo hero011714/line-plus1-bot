@@ -16,41 +16,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
-_bot_user_id = None
-
-def get_bot_user_id():
-    global _bot_user_id
-    if _bot_user_id:
-        return _bot_user_id
-    try:
-        import requests as _requests
-        resp = _requests.get(
-            "https://api.line.me/v2/profile",
-            headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            _bot_user_id = resp.json().get("userId")
-            print(f"[BOT_ID] Cached bot_user_id={_bot_user_id}")
-    except Exception as e:
-        print(f"[BOT_ID] Error fetching bot user_id: {e}")
-    return _bot_user_id
-
-# Fetch bot user_id at startup
-def init_bot_user_id():
-    global _bot_user_id
-    try:
-        import requests as _requests
-        resp = _requests.get(
-            "https://api.line.me/v2/profile",
-            headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            _bot_user_id = resp.json().get("userId")
-            print(f"[BOT_ID] Startup bot_user_id={_bot_user_id}")
-    except Exception as e:
-        print(f"[BOT_ID] Startup error: {e}")
 
 app = FastAPI()
 
@@ -98,6 +63,14 @@ def init_tables():
             )
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS whitelist (
+                user_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                PRIMARY KEY (user_id, group_id)
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS signups (
                 user_id TEXT NOT NULL,
                 group_id TEXT NOT NULL,
@@ -137,7 +110,6 @@ def init_tables():
         return False
 
 init_tables()
-init_bot_user_id()
 
 def get_group_id(event):
     source_type = event.source.type
@@ -153,9 +125,11 @@ def clear_group_data(group_id):
     if not cur:
         return
     try:
+        cur.execute("DELETE FROM whitelist WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM config WHERE group_id=%s", (group_id,))
     except:
         pass
 
@@ -164,11 +138,11 @@ def get_price(group_id):
     if not cur:
         return 50
     try:
-        cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key='price'", (group_id,))
         result = cur.fetchone()
         if result:
             return int(result[0])
-        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', '50')", (group_id,))
         return 50
     except:
         return 50
@@ -193,7 +167,7 @@ def get_event_duration():
         result = cur.fetchone()
         if result:
             return int(result[0])
-        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'event_duration', '30') ON CONFLICT DO NOTHING")
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'event_duration', '30')")
         return 30
     except:
         return 30
@@ -203,7 +177,7 @@ def set_price(group_id, price):
     if not cur:
         return
     try:
-        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (str(price), str(price)))
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(price), str(price)))
     except:
         pass
 
@@ -255,9 +229,54 @@ def get_user_name(user_id, group_id):
         result = cur.fetchone()
         if result and result[0]:
             return result[0]
+        cur.execute("SELECT name FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        result2 = cur.fetchone()
+        if result2 and result2[0]:
+            return result2[0]
         return user_id[-4:]
     except:
         return user_id[-4:]
+
+def is_whitelist(user_id, group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        return cur.fetchone() is not None
+    except:
+        return False
+
+def add_to_whitelist(user_id, group_id, name=""):
+    old_count = get_count(user_id, group_id)
+    cur = get_cursor()
+    if not cur:
+        return old_count
+    try:
+        cur.execute("INSERT INTO whitelist (user_id, group_id, name) VALUES (%s, %s, %s) ON CONFLICT (user_id, group_id) DO UPDATE SET name = %s", (user_id, group_id, name, name))
+        cur.execute("UPDATE users SET count=0 WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+    except:
+        pass
+    return old_count
+
+def remove_from_whitelist(user_id, group_id):
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("DELETE FROM whitelist WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+    except:
+        pass
+
+def get_whitelist(group_id):
+    cur = get_cursor()
+    if not cur:
+        return []
+    try:
+        cur.execute("SELECT user_id, name FROM whitelist WHERE group_id=%s", (group_id,))
+        return cur.fetchall()
+    except:
+        return []
 
 def add_count(user_id, group_id, n=1, name=""):
     cur = get_cursor()
@@ -300,7 +319,6 @@ def clear_all_users(group_id):
     try:
         cur.execute("UPDATE users SET count=0 WHERE group_id=%s", (group_id,))
         cur.execute("UPDATE events SET total_count=0 WHERE group_id=%s", (group_id,))
-        cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
     except:
         pass
 
@@ -323,20 +341,24 @@ def get_user_by_name(name, group_id):
         result = cur.fetchone()
         if result:
             return result[0]
-        return None
+        cur.execute("SELECT user_id FROM whitelist WHERE name=%s AND group_id=%s", (name, group_id))
+        result2 = cur.fetchone()
+        return result2[0] if result2 else None
     except:
         return None
 
 def get_group_stats(group_id):
     cur = get_cursor()
     if not cur:
-        return 0
+        return 0, 0
     try:
         cur.execute("SELECT COUNT(*) FROM users WHERE group_id=%s", (group_id,))
         user_count = cur.fetchone()[0]
-        return user_count
+        cur.execute("SELECT COUNT(*) FROM whitelist WHERE group_id=%s", (group_id,))
+        whitelist_count = cur.fetchone()[0]
+        return user_count, whitelist_count
     except:
-        return 0
+        return 0, 0
 
 def get_signup_limit(group_id):
     cur = get_cursor()
@@ -508,10 +530,9 @@ def get_mentioned_users(event, exclude_id=None):
     mentioned = []
     group_id = get_group_id(event)
     mention = getattr(event.message, 'mention', None)
-    bot_uid = get_bot_user_id()
     if mention and hasattr(mention, 'mentionees'):
         for m in mention.mentionees:
-            if m.user_id and m.user_id != exclude_id and m.user_id != bot_uid:
+            if m.user_id and m.user_id != exclude_id:
                 name = get_user_name(m.user_id, group_id)
                 try:
                     if should_fetch_profile(m.user_id, group_id):
@@ -526,36 +547,17 @@ def get_mentioned_users(event, exclude_id=None):
                 mentioned.append((m.user_id, name))
     return mentioned, group_id
 
-def strip_mentions(text, event):
-    if text.startswith(('+', '-')):
-        return text
-    mention = getattr(event.message, 'mention', None)
-    if mention and hasattr(mention, 'mentionees'):
-        mentionees = list(mention.mentionees)
-        mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
-        for m in mentionees:
-            m_idx = getattr(m, 'index', None)
-            m_len = getattr(m, 'length', None)
-            if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
-                text = text[:m_idx] + text[m_idx + m_len:]
-    return text.strip()
-
 @app.get("/")
 async def health_check():
     return "OK"
 
-@app.head("/")
-async def health_check_head():
-    return "OK"
+@handler.add(JoinEvent)
+def handle_join(event):
+    reply_token = event.reply_token
+    msg = """大家好！我是記帳機器人，專門用來管理球場活動報名和記帳。
 
-@app.get("/me")
-async def bot_me():
-    uid = get_bot_user_id()
-    return {"bot_user_id": uid}
-
-@app.head("/callback")
-async def callback_head():
-    return ""
+有任何問題請輸入「幫助」查看完整指令列表！"""
+    line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -569,36 +571,35 @@ async def callback(request: Request):
         return "Invalid signature"
     except Exception as e:
         print(f"Error: {e}")
+        return "Error"
 
     return "OK"
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    print(f"[START] entering handle_message")
     user_id = event.source.user_id
-    print(f"[STEP1] user_id={user_id[:10]}")
     text = event.message.text.strip()
-    print(f"[STEP2] text={repr(text)}")
     group_id = get_group_id(event)
-    print(f"[STEP3] group_id={group_id[:20] if group_id else None}")
     price = get_price(group_id)
     user_name = get_user_name(user_id, group_id)
     reply_token = event.reply_token
     source_type = event.source.type
-    print(f"[STEP4] setup done, checking mention")
 
-    if not text.startswith(('+', '-')):
-        mention = getattr(event.message, 'mention', None)
-        if mention and hasattr(mention, 'mentionees'):
-            mentionees = list(mention.mentionees)
-            mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
-            for m in mentionees:
-                m_idx = getattr(m, 'index', None)
-                m_len = getattr(m, 'length', None)
-                if m_idx is not None and m_len is not None and m_len > 0 and m_idx + m_len <= len(text):
-                    text = text[:m_idx] + text[m_idx + m_len:]
-    text = text.strip()
-    print(f"[MSG] raw={repr(event.message.text)} stripped={repr(text)}")
+    mention = getattr(event.message, 'mention', None)
+    if mention and hasattr(mention, 'mentionees'):
+        mentionees = list(mention.mentionees)
+        mentionees.sort(key=lambda m: getattr(m, 'index', 0) if getattr(m, 'index', 0) is not None else 0, reverse=True)
+        for m in mentionees:
+            uid = getattr(m, 'user_id', None)
+            if uid:
+                text = re.sub(r'@' + re.escape(uid), '', text)
+            m_len = getattr(m, 'length', None)
+            m_idx = getattr(m, 'index', None)
+            if m_idx is not None and m_len is not None:
+                text = text[:m_idx] + text[m_idx + m_len:]
+    text = re.sub(r'@[^\s@]+', '', text).strip()
+    while '  ' in text:
+        text = text.replace('  ', ' ')
     
     if should_fetch_profile(user_id, group_id):
         try:
@@ -610,6 +611,16 @@ def handle_message(event):
             add_user(user_id, group_id, user_name)
     else:
         add_user(user_id, group_id, user_name)
+    
+    try:
+        mentioned, _ = get_mentioned_users(event, user_id)
+        for m_user_id, m_name in mentioned:
+            pass
+    except:
+        pass
+
+    if is_whitelist(user_id, group_id):
+        return
 
     if text in ["幫助", "help"]:
         is_admin = (user_id == ADMIN_ID)
@@ -624,33 +635,22 @@ def handle_message(event):
             msg += "設定單價 [數字]\n"
             msg += "設定報名人數上限 [數字]\n"
             msg += "設定活動時間 [小時]\n"
+            msg += "白名單加入 @人\n"
+            msg += "白名單移除 @人\n"
+            msg += "白名單：查看白名單\n"
+            msg += "已繳 @人：清除帳目\n"
             msg += "@人 +N：替他人記錄（教練）\n"
             msg += "重置全部：清除所有紀錄資料\n"
-            msg += "活動結束：提早結束活動\n"
             msg += "全部帳單：查看所有群組的欠款\n"
             msg += "退出群組：清除資料並退出\n"
             msg += "狀態：查看系統狀態"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
-    if text == "活動結束" and user_id == ADMIN_ID:
-        if not is_event_active(group_id):
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="目前沒有進行中的活動"))
-            return
-        cur = get_cursor()
-        if cur:
-            try:
-                cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
-                cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
-            except:
-                pass
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 活動已結束"))
-        return
-
     if text == "狀態" and user_id == ADMIN_ID:
         try:
             cur = get_cursor()
-            user_count = get_group_stats(group_id)
+            user_count, whitelist_count = get_group_stats(group_id)
             
             msg = "📊 系統狀態：\n\n"
             db_size_mb = 0
@@ -668,15 +668,12 @@ def handle_message(event):
             
             event_active = is_event_active(group_id)
             remaining = get_event_remaining_hours(group_id)
-            signup_count = get_signup_count(group_id)
             
             msg += f"👥 目前群組：\n"
-            if event_active and remaining > 0:
-                msg += f"   活動：已開啟（剩餘 {remaining} 小時）\n"
-            else:
-                msg += f"   活動：未開啟\n"
-            msg += f"   報名人數：{signup_count} / {get_signup_limit(group_id)} 人\n"
+            msg += f"   活動：{'已開啟（剩餘 ' + str(remaining) + ' 小時）' if event_active else '未開啟'}\n"
+            msg += f"   報名人數：{get_signup_count(group_id)} / {get_signup_limit(group_id)} 人\n"
             msg += f"   登記用戶：{user_count} 人\n"
+            msg += f"   白名單：{whitelist_count} 人\n"
             msg += f"   目前單價：{price} 元"
             
             if db_size_mb > 900:
@@ -731,11 +728,11 @@ def handle_message(event):
         return
 
     if text == "重置全部" and user_id == ADMIN_ID:
+        clear_all_users(group_id)
+        clear_signups(group_id)
         cur = get_cursor()
         if cur:
             try:
-                cur.execute("UPDATE users SET count=0 WHERE group_id=%s", (group_id,))
-                cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
                 cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
             except:
                 pass
@@ -759,6 +756,9 @@ def handle_message(event):
         has_debt = False
         current_gid = None
         for uid, name, count, gid in rows:
+            cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (uid, gid))
+            if cur.fetchone():
+                continue
             if gid != current_gid:
                 current_gid = gid
                 if gid.startswith('private_'):
@@ -803,6 +803,17 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
+    if text == "白名單" and user_id == ADMIN_ID:
+        rows = get_whitelist(group_id)
+        if rows:
+            msg = "📋 白名單：\n"
+            for uid, name in rows:
+                msg += f"✅ @{name}\n"
+        else:
+            msg = "📋 白名單是空的"
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
     if text == "查帳":
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="尚無資料"))
@@ -811,35 +822,146 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
         return
 
-    # Admin @人 +N command (only in group/room, not private chat)
-    if user_id == ADMIN_ID and text.startswith("+") and source_type in ['group', 'room']:
+    if text.startswith("白名單加入") and user_id == ADMIN_ID:
+        target_user_id = None
+        target_name = None
+        
         mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        if mentioned:
-            target_user_id, target_name = mentioned[0]
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        
+        if not target_user_id:
+            parts = text.replace("白名單加入", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
+        
+        if target_user_id:
+            old_count = add_to_whitelist(target_user_id, group_id, target_name or "")
+            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+            msg = f"✅ 已將 {name_display} 加入白名單"
+            if old_count > 0:
+                msg += f"\n（已清除 {old_count} 次帳目）"
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「白名單加入 @人」格式"))
+        return
+
+    if text.startswith("白名單移除") and user_id == ADMIN_ID:
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+        target_user_id = None
+        target_name = None
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        
+        if not target_user_id:
+            parts = text.replace("白名單移除", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
+        
+        if target_user_id:
+            remove_from_whitelist(target_user_id, group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 @{target_name} 移出白名單"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「白名單移除 @人」格式"))
+        return
+
+    if text.startswith("已繳") and user_id == ADMIN_ID:
+        target_user_id = None
+        target_name = None
+        
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        
+        if not target_user_id:
+            parts = text.replace("已繳", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
+        
+        if target_user_id:
+            clear_user(target_user_id, group_id)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 0 人"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
+        return
+
+    if text.startswith("@") and user_id == ADMIN_ID:
+        parts = text.split()
+        if len(parts) >= 2:
+            target_name = parts[0].replace("@", "")
             
-            if text == "+":
-                n = 1
-            else:
-                try:
-                    n = int(text.lstrip("+"))
-                except:
-                    n = 0
+            mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+            target_user_id = None
+            for m_user_id, m_name in mentioned:
+                target_user_id = m_user_id
+                target_name = m_name
+                break
             
-            if n > 0:
-                if not is_signed_up(target_user_id, group_id):
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
-                    return
-                limit = get_signup_limit(group_id)
-                current_total = get_total_count(group_id)
-                if current_total + n > limit:
-                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
-                    return
-                add_count(target_user_id, group_id, n)
-                add_total_count(group_id, n)
-                new_count = get_total_count(group_id)
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
+            if not target_user_id:
+                target_user_id = get_user_by_name(target_name, group_id)
+            
+            if not target_user_id:
+                raw = event.message.text
+                mention = getattr(event.message, 'mention', None)
+                if mention and hasattr(mention, 'mentionees'):
+                    for m in mention.mentionees:
+                        uid = getattr(m, 'user_id', None)
+                        if uid:
+                            raw = re.sub(r'@' + re.escape(uid), '', raw)
+                raw = re.sub(r'@\S+', '', raw).strip()
+                parts2 = raw.split()
+                if len(parts2) >= 2 and parts2[1].startswith("+"):
+                    target_name = parts2[0].replace("@", "")
+                    target_user_id = get_user_by_name(target_name, group_id)
+            
+            if not target_user_id:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ 找不到 @{target_name}，請先傳訊息讓機器人學習"))
                 return
-        # If no mentions, continue to regular + block below
+            
+            if target_user_id and len(parts) >= 2:
+                count_text = parts[1]
+                if count_text in ["+", "++"]:
+                    n = 1
+                elif count_text.startswith("+"):
+                    try:
+                        n = int(count_text.lstrip("+"))
+                    except:
+                        n = 0
+                else:
+                    n = 0
+                
+                if n > 0:
+                    if is_whitelist(target_user_id, group_id):
+                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 在白名單中，無法記錄"))
+                        return
+                    if not is_signed_up(target_user_id, group_id):
+                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
+                        return
+                    limit = get_signup_limit(group_id)
+                    current_total = get_total_count(group_id)
+                    if current_total + n > limit:
+                        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
+                        return
+                    add_count(target_user_id, group_id, n)
+                    add_total_count(group_id, n)
+                    new_count = get_total_count(group_id)
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
+                    return
 
     signup_prefixes = ["今天打球", "明天打球"]
     for prefix in signup_prefixes:
@@ -853,7 +975,6 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
-        print(f"[PLUS] text={repr(text)} group={repr(group_id)} active={is_event_active(group_id)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
@@ -895,9 +1016,6 @@ def handle_message(event):
         return
 
     if text.startswith("-"):
-        if not is_event_active(group_id):
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="⚠️ 活動尚未開始或已結束"))
-            return
         if not is_signed_up(user_id, group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="請先「+1」報到"))
             return
