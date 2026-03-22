@@ -523,6 +523,7 @@ async def callback(request: Request):
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    print(f"[HANDLE] msg_type={type(event.message).__name__} source={event.source.type} text={repr(event.message.text)[:50]}")
     user_id = event.source.user_id
     text = event.message.text.strip()
     group_id = get_group_id(event)
