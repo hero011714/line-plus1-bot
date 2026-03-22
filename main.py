@@ -31,8 +31,11 @@ def get_bot_user_id():
         )
         if resp.status_code == 200:
             _bot_user_id = resp.json().get("userId")
-    except:
-        pass
+            print(f"[BOT_ID] Cached: {_bot_user_id}")
+        else:
+            print(f"[BOT_ID] Failed: {resp.status_code}")
+    except Exception as e:
+        print(f"[BOT_ID] Error: {e}")
     return _bot_user_id
 
 app = FastAPI()
@@ -120,6 +123,7 @@ def init_tables():
         return False
 
 init_tables()
+get_bot_user_id()  # Cache bot user_id at startup
 
 def get_group_id(event):
     source_type = event.source.type
@@ -510,6 +514,11 @@ def get_mentioned_users(event, exclude_id=None):
 @app.get("/")
 async def health_check():
     return "OK"
+
+@app.get("/me")
+async def bot_me():
+    uid = get_bot_user_id()
+    return {"bot_user_id": uid}
 
 @handler.add(JoinEvent)
 def handle_join(event):
