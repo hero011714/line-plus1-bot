@@ -254,6 +254,18 @@ def get_user_name(user_id, group_id):
     except:
         return user_id[-4:]
 
+def fetch_group_member_name(user_id, group_id):
+    """Try to fetch user's display name from group member API (works without being friends)."""
+    if not group_id or group_id.startswith('private_'):
+        return None
+    try:
+        profile = line_bot_api.get_group_member_profile(group_id, user_id)
+        if profile and profile.display_name:
+            return profile.display_name
+    except:
+        pass
+    return None
+
 def add_count(user_id, group_id, n=1, name=""):
     cur = get_cursor()
     if not cur:
@@ -629,10 +641,10 @@ def handle_message(event):
                 else:
                     mention_name = None
                 target_name = get_user_name(target_user_id, group_id)
-                # Fetch target profile if needed
+                # Fetch target profile if needed (always group context here)
                 if should_fetch_profile(target_user_id, group_id):
                     try:
-                        profile = line_bot_api.get_profile(target_user_id)
+                        profile = line_bot_api.get_group_member_profile(group_id, target_user_id)
                         target_name = profile.display_name
                         add_user(target_user_id, group_id, target_name)
                         update_user_name(target_user_id, group_id, target_name)
@@ -728,7 +740,11 @@ def handle_message(event):
 
     if should_fetch_profile(user_id, group_id):
         try:
-            profile = line_bot_api.get_profile(user_id)
+            # Use group member API for group chats (works even if user is not bot's friend)
+            if source_type == 'group':
+                profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            else:
+                profile = line_bot_api.get_profile(user_id)
             user_name = profile.display_name
             add_user(user_id, group_id, user_name)
             update_user_name(user_id, group_id, user_name)
@@ -941,18 +957,29 @@ def handle_message(event):
                 row = cur.fetchone()
                 if row and row[0]:
                     display_name = row[0]
-            if not display_name:
-                try:
-                    profile = line_bot_api.get_profile(uid)
-                    display_name = profile.display_name
+            if not display_name or len(display_name) <= 4:
+                # Try group member API first (works without being friends)
+                api_name = fetch_group_member_name(uid, gid)
+                if api_name:
+                    display_name = api_name
                     cur.execute("""
                         INSERT INTO users (user_id, group_id, name, count, last_fetch)
                         VALUES (%s, %s, %s, 0, 0)
                         ON CONFLICT (user_id, group_id)
                         DO UPDATE SET name = EXCLUDED.name
                     """, (uid, gid, display_name))
-                except:
-                    pass
+                else:
+                    try:
+                        profile = line_bot_api.get_profile(uid)
+                        display_name = profile.display_name
+                        cur.execute("""
+                            INSERT INTO users (user_id, group_id, name, count, last_fetch)
+                            VALUES (%s, %s, %s, 0, 0)
+                            ON CONFLICT (user_id, group_id)
+                            DO UPDATE SET name = EXCLUDED.name
+                        """, (uid, gid, display_name))
+                    except:
+                        pass
             if not display_name:
                 display_name = uid[-4:]
             cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
@@ -1060,13 +1087,19 @@ def handle_message(event):
         limit = get_signup_limit(group_id)
         msg = "🏀 打球名單：\n\n"
         for idx, (uid, name, count) in enumerate(rows, 1):
-            # Get display name
+            # Get display name - try group member API if name is missing or ID fragment
+            if not name or len(name) <= 4:
+                api_name = fetch_group_member_name(uid, group_id)
+                if api_name:
+                    name = api_name
+                    # Save to DB for future use
+                    update_user_name(uid, group_id, api_name)
             if not name:
                 name = uid[-4:]
-            display_name = name if len(name) > 4 else name
-            prefix = "" if len(name) > 4 else ""
+            display_name = name
+            name_prefix = "" if len(name) <= 4 else "@"
             member_tag = " [年繳]" if is_yearly_member(uid, group_id) else ""
-            msg += f"{idx}. @{display_name} ({count}人){member_tag}\n"
+            msg += f"{idx}. {name_prefix}{display_name} ({count}人){member_tag}\n"
         msg += "----------------------\n"
         msg += f"👥 報名：{total_count} 人 / 上限：{limit} 人"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
