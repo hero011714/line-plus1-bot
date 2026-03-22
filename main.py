@@ -752,13 +752,25 @@ def handle_message(event):
         has_debt = False
         current_gid = None
         for uid, name, count, gid in rows:
-            if gid != current_gid:
-                current_gid = gid
-                group_label = gid if not gid.startswith('private_') else '私聊'
-                msg += f"【{group_label}】\n"
             cur.execute("SELECT 1 FROM whitelist WHERE user_id=%s AND group_id=%s", (uid, gid))
             if cur.fetchone():
                 continue
+            if gid != current_gid:
+                current_gid = gid
+                if gid.startswith('private_'):
+                    group_label = '私聊'
+                else:
+                    group_label = gid
+                    try:
+                        summary = line_bot_api.get_group_summary(gid)
+                        group_label = summary.group_name
+                    except:
+                        try:
+                            summary = line_bot_api.get_room(room_id=gid)
+                            group_label = summary.room_name
+                        except:
+                            pass
+                msg += f"【{group_label}】\n"
             display_name = name
             if not display_name:
                 cur.execute("SELECT name FROM signups WHERE user_id=%s", (uid,))
@@ -769,6 +781,12 @@ def handle_message(event):
                 try:
                     profile = line_bot_api.get_profile(uid)
                     display_name = profile.display_name
+                    cur.execute("""
+                        INSERT INTO users (user_id, group_id, name, count, last_fetch)
+                        VALUES (%s, %s, %s, 0, 0)
+                        ON CONFLICT (user_id, group_id)
+                        DO UPDATE SET name = EXCLUDED.name
+                    """, (uid, gid, display_name))
                 except:
                     display_name = uid[-4:]
             cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
