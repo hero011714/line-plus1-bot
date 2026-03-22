@@ -31,9 +31,26 @@ def get_bot_user_id():
         )
         if resp.status_code == 200:
             _bot_user_id = resp.json().get("userId")
-    except:
-        pass
+            print(f"[BOT_ID] Cached bot_user_id={_bot_user_id}")
+    except Exception as e:
+        print(f"[BOT_ID] Error fetching bot user_id: {e}")
     return _bot_user_id
+
+# Fetch bot user_id at startup
+def init_bot_user_id():
+    global _bot_user_id
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            "https://api.line.me/v2/profile",
+            headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            _bot_user_id = resp.json().get("userId")
+            print(f"[BOT_ID] Startup bot_user_id={_bot_user_id}")
+    except Exception as e:
+        print(f"[BOT_ID] Startup error: {e}")
 
 app = FastAPI()
 
@@ -120,6 +137,7 @@ def init_tables():
         return False
 
 init_tables()
+init_bot_user_id()
 
 def get_group_id(event):
     source_type = event.source.type
@@ -793,36 +811,35 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
         return
 
-    if user_id == ADMIN_ID and text.startswith("+"):
-        if group_id.startswith('private_'):
-            return
+    # Admin @人 +N command (only in group/room, not private chat)
+    if user_id == ADMIN_ID and text.startswith("+") and source_type in ['group', 'room']:
         mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        if not mentioned:
-            return
-        target_user_id, target_name = mentioned[0]
-        
-        if text == "+":
-            n = 1
-        else:
-            try:
-                n = int(text.lstrip("+"))
-            except:
-                n = 0
-        
-        if n > 0:
-            if not is_signed_up(target_user_id, group_id):
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
+        if mentioned:
+            target_user_id, target_name = mentioned[0]
+            
+            if text == "+":
+                n = 1
+            else:
+                try:
+                    n = int(text.lstrip("+"))
+                except:
+                    n = 0
+            
+            if n > 0:
+                if not is_signed_up(target_user_id, group_id):
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"❌ @{target_name} 尚未報到"))
+                    return
+                limit = get_signup_limit(group_id)
+                current_total = get_total_count(group_id)
+                if current_total + n > limit:
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
+                    return
+                add_count(target_user_id, group_id, n)
+                add_total_count(group_id, n)
+                new_count = get_total_count(group_id)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
                 return
-            limit = get_signup_limit(group_id)
-            current_total = get_total_count(group_id)
-            if current_total + n > limit:
-                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
-                return
-            add_count(target_user_id, group_id, n)
-            add_total_count(group_id, n)
-            new_count = get_total_count(group_id)
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 累計人數 {new_count} 人"))
-            return
+        # If no mentions, continue to regular + block below
 
     signup_prefixes = ["今天打球", "明天打球"]
     for prefix in signup_prefixes:
