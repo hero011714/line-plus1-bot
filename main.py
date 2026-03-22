@@ -750,9 +750,6 @@ def handle_message(event):
         return
 
     if text == "查帳":
-        if not is_signed_up(user_id, group_id):
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="尚無資料"))
-            return
         count = get_count(user_id, group_id)
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
         return
