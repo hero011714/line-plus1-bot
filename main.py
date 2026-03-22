@@ -257,13 +257,17 @@ def get_user_name(user_id, group_id):
 def fetch_group_member_name(user_id, group_id):
     """Try to fetch user's display name from group member API (works without being friends)."""
     if not group_id or group_id.startswith('private_'):
+        print(f"[NAME] Skip: private chat or no group_id (uid={user_id[-4:]})")
         return None
     try:
         profile = line_bot_api.get_group_member_profile(group_id, user_id)
         if profile and profile.display_name:
+            print(f"[NAME] OK: {user_id[-4:]} -> {profile.display_name}")
             return profile.display_name
-    except:
-        pass
+        else:
+            print(f"[NAME] Empty profile for {user_id[-4:]}")
+    except Exception as e:
+        print(f"[NAME] Error: {user_id[-4:]} -> {e}")
     return None
 
 def add_count(user_id, group_id, n=1, name=""):
@@ -771,6 +775,7 @@ def handle_message(event):
             msg += "已繳 @人：清除用戶帳目（繳費確認）\n"
             msg += "年繳加入 / 年繳移除 @人：管理年繳會員\n"
             msg += "年繳名單：查看年繳會員\n"
+            msg += "年繳全部移除：移除所有年繳會員\n"
             msg += "重置全部：清除所有紀錄資料\n"
             msg += "活動結束：提早結束活動\n"
             msg += "全部帳單：查看所有群組的欠款\n"
@@ -1058,6 +1063,20 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
+    if text == "年繳全部移除" and user_id == ADMIN_ID:
+        cur = get_cursor()
+        if not cur:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
+            return
+        cur.execute("SELECT COUNT(*) FROM yearly_members WHERE group_id=%s", (group_id,))
+        count = cur.fetchone()[0]
+        if count == 0:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="📋 目前沒有年繳會員"))
+            return
+        cur.execute("DELETE FROM yearly_members WHERE group_id=%s", (group_id,))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已移除全部 {count} 位年繳會員"))
+        return
+
     if text == "查帳":
         count = get_count(user_id, group_id)
         if is_yearly_member(user_id, group_id):
@@ -1087,13 +1106,20 @@ def handle_message(event):
         limit = get_signup_limit(group_id)
         msg = "🏀 打球名單：\n\n"
         for idx, (uid, name, count) in enumerate(rows, 1):
-            # Get display name - try group member API if name is missing or ID fragment
+            # Get display name - try multiple sources
             if not name or len(name) <= 4:
-                api_name = fetch_group_member_name(uid, group_id)
-                if api_name:
-                    name = api_name
-                    # Save to DB for future use
-                    update_user_name(uid, group_id, api_name)
+                # Step 1: Try signups table
+                cur.execute("SELECT name FROM signups WHERE user_id=%s AND group_id=%s", (uid, group_id))
+                signup_row = cur.fetchone()
+                if signup_row and signup_row[0] and len(signup_row[0]) > 4:
+                    name = signup_row[0]
+                    update_user_name(uid, group_id, name)
+                else:
+                    # Step 2: Try group member API
+                    api_name = fetch_group_member_name(uid, group_id)
+                    if api_name:
+                        name = api_name
+                        update_user_name(uid, group_id, api_name)
             if not name:
                 name = uid[-4:]
             display_name = name
