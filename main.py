@@ -493,17 +493,13 @@ def get_mentioned_users(event, exclude_id=None):
 async def health_check():
     return "OK"
 
+@app.head("/")
+async def health_check_head():
+    return "OK"
+
 @app.head("/callback")
 async def callback_head():
     return ""
-
-@handler.add(JoinEvent)
-def handle_join(event):
-    reply_token = event.reply_token
-    msg = """大家好！我是記帳機器人，專門用來管理球場活動報名和記帳。
-
-有任何問題請輸入「幫助」查看完整指令列表！"""
-    line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -516,16 +512,12 @@ async def callback(request: Request):
     except InvalidSignatureError:
         return "Invalid signature"
     except Exception as e:
-        import traceback
         print(f"Error: {e}")
-        traceback.print_exc()
-        return "Error"
 
     return "OK"
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    print(f"[HANDLE] msg_type={type(event.message).__name__} source={event.source.type} text={repr(event.message.text)[:50]}")
     user_id = event.source.user_id
     text = event.message.text.strip()
     group_id = get_group_id(event)
@@ -533,7 +525,6 @@ def handle_message(event):
     user_name = get_user_name(user_id, group_id)
     reply_token = event.reply_token
     source_type = event.source.type
-    print(f"[CHECK] text={repr(text)} at end of setup")
 
     mention = getattr(event.message, 'mention', None)
     if mention and hasattr(mention, 'mentionees'):
@@ -800,7 +791,6 @@ def handle_message(event):
             return
 
     if text.startswith("+"):
-        print(f"[+] text={repr(text)} group_id={repr(group_id)} event_active={is_event_active(group_id)}")
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
