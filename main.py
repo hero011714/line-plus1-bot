@@ -101,6 +101,14 @@ def init_tables():
             )
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS yearly_members (
+                user_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                PRIMARY KEY (user_id, group_id)
+            )
+        """)
+        cur.execute("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name='events' AND column_name='total_count'
         """)
@@ -443,6 +451,46 @@ def is_signed_up(user_id, group_id):
     except:
         return False
 
+def is_yearly_member(user_id, group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("SELECT 1 FROM yearly_members WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        return cur.fetchone() is not None
+    except:
+        return False
+
+def add_yearly_member(user_id, group_id, name=""):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("INSERT INTO yearly_members (user_id, group_id, name) VALUES (%s, %s, %s) ON CONFLICT (user_id, group_id) DO UPDATE SET name = %s", (user_id, group_id, name, name))
+        return True
+    except:
+        return False
+
+def remove_yearly_member(user_id, group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("DELETE FROM yearly_members WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        return True
+    except:
+        return False
+
+def get_yearly_members(group_id):
+    cur = get_cursor()
+    if not cur:
+        return []
+    try:
+        cur.execute("SELECT user_id, name FROM yearly_members WHERE group_id=%s", (group_id,))
+        return cur.fetchall()
+    except:
+        return []
+
 def atomic_signup(user_id, group_id, name=""):
     cur = get_cursor()
     if not cur:
@@ -704,6 +752,8 @@ def handle_message(event):
             msg += "設定活動時間 [小時]\n"
             msg += "@人 +N / -N：替他人記錄（教練）\n"
             msg += "已繳 @人：清除用戶帳目（繳費確認）\n"
+            msg += "年繳加入 / 年繳移除 @人：管理年繳會員\n"
+            msg += "年繳名單：查看年繳會員\n"
             msg += "重置全部：清除所有紀錄資料\n"
             msg += "活動結束：提早結束活動\n"
             msg += "全部帳單：查看所有群組的欠款\n"
@@ -865,6 +915,9 @@ def handle_message(event):
         has_debt = False
         current_gid = None
         for uid, name, count, gid in rows:
+            # Skip yearly members (they don't need to pay)
+            if is_yearly_member(uid, gid):
+                continue
             if gid != current_gid:
                 current_gid = gid
                 if gid.startswith('private_'):
@@ -915,9 +968,74 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
+    # Yearly member commands (admin only)
+    if text.startswith("年繳加入") and user_id == ADMIN_ID:
+        target_user_id = None
+        target_name = None
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        if not target_user_id:
+            parts = text.replace("年繳加入", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
+        if target_user_id:
+            add_yearly_member(target_user_id, group_id, target_name or "")
+            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {name_display} 設為年繳會員"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「年繳加入 @人」格式"))
+        return
+
+    if text.startswith("年繳移除") and user_id == ADMIN_ID:
+        target_user_id = None
+        target_name = None
+        mentioned, _ = get_mentioned_users(event, ADMIN_ID)
+        for m_user_id, m_name in mentioned:
+            target_user_id = m_user_id
+            target_name = m_name
+            break
+        if not target_user_id:
+            parts = text.replace("年繳移除", "").strip()
+            if parts.startswith("@"):
+                parts = parts[1:]
+            if parts:
+                target_user_id = get_user_by_name(parts, group_id)
+                target_name = parts
+        if target_user_id:
+            remove_yearly_member(target_user_id, group_id)
+            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {name_display} 移出年繳會員"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「年繳移除 @人」格式"))
+        return
+
+    if text == "年繳名單" and user_id == ADMIN_ID:
+        rows = get_yearly_members(group_id)
+        if rows:
+            msg = "📋 年繳會員名單：\n"
+            for uid, name in rows:
+                display_name = name if name else uid[-4:]
+                if len(display_name) <= 4:
+                    msg += f"  {display_name}\n"
+                else:
+                    msg += f"  @{display_name}\n"
+        else:
+            msg = "📋 目前沒有年繳會員"
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
     if text == "查帳":
         count = get_count(user_id, group_id)
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
+        if is_yearly_member(user_id, group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 0 元（年繳會員）"))
+        else:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"@{user_name} 目前 {count} 次，應繳 {count*price} 元"))
         return
 
     signup_prefixes = ["今天打球", "明天打球"]
