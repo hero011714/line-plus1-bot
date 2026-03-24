@@ -601,14 +601,9 @@ def should_auto_trigger():
         print(f"[AUTO] Error checking time: {e}")
         return False
     
-    # Step 4: Check if already triggered today
-    last_trigger = get_last_auto_trigger_date()
-    print(f"[AUTO] Last trigger: {last_trigger}, Today: {today_str}")
-    if last_trigger == today_str:
-        print(f"[AUTO] Already triggered today, skip")
-        return False
-    
-    print(f"[AUTO] All checks passed, will trigger!")
+    # Step 4: Record trigger time (but allow multiple triggers in same window)
+    # This is mainly for debugging purposes
+    print(f"[AUTO] In time window, will trigger!")
     return True
 
 def build_list_message(group_id):
