@@ -4,6 +4,7 @@ import psycopg2
 import asyncio
 import time
 import psutil
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Request
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, JoinEvent
@@ -507,6 +508,157 @@ def get_yearly_members(group_id):
     except:
         return []
 
+def get_auto_schedule_config(key):
+    cur = get_cursor()
+    if not cur:
+        return None
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id='default' AND key=%s", (key,))
+        result = cur.fetchone()
+        return result[0] if result else None
+    except:
+        return None
+
+def set_auto_schedule_config(key, value):
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', %s, %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (key, value, value))
+    except:
+        pass
+
+def get_active_groups():
+    cur = get_cursor()
+    if not cur:
+        return []
+    try:
+        now = int(time.time())
+        cur.execute("SELECT group_id FROM events WHERE expires_at > %s", (now,))
+        return [row[0] for row in cur.fetchall()]
+    except:
+        return []
+
+def get_last_auto_trigger_date():
+    return get_auto_schedule_config('auto_last_trigger')
+
+def set_last_auto_trigger_date(date_str):
+    set_auto_schedule_config('auto_last_trigger', date_str)
+
+def should_auto_trigger():
+    taiwan_tz = timezone(timedelta(hours=8))
+    now = datetime.now(taiwan_tz)
+    today_str = now.strftime("%Y-%m-%d")
+    
+    last_trigger = get_last_auto_trigger_date()
+    if last_trigger == today_str:
+        return False
+    
+    days_str = get_auto_schedule_config('auto_schedule_days')
+    if not days_str:
+        return False
+    
+    scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+    if now.weekday() + 1 not in scheduled_days:
+        return False
+    
+    time_str = get_auto_schedule_config('auto_schedule_time')
+    if not time_str:
+        return False
+    
+    try:
+        time_parts = time_str.split(':')
+        target_hour = int(time_parts[0])
+        target_minute = int(time_parts[1])
+        current_hour = now.hour
+        current_minute = now.minute
+        
+        window_end = target_minute + 30
+        if window_end >= 60:
+            if (current_hour == target_hour and current_minute >= target_minute) or \
+               (current_hour == target_hour + 1 and current_minute <= window_end - 60):
+                return True
+        else:
+            if current_hour == target_hour and target_minute <= current_minute <= window_end:
+                return True
+    except:
+        pass
+    
+    return False
+
+def build_list_message(group_id):
+    cur = get_cursor()
+    if not cur:
+        return None
+    cur.execute("""
+        SELECT user_id, name, count
+        FROM users
+        WHERE group_id = %s AND count > 0
+        ORDER BY count DESC
+    """, (group_id,))
+    rows = cur.fetchall()
+    
+    if not rows:
+        return "📋 目前无人报名"
+    
+    total_count = sum(r[2] for r in rows)
+    limit = get_signup_limit(group_id)
+    msg = "🏀 打球名单：\n\n"
+    for idx, (uid, name, count) in enumerate(rows, 1):
+        if not name or len(name) <= 4:
+            cur.execute("SELECT name FROM signups WHERE user_id=%s AND group_id=%s", (uid, group_id))
+            signup_row = cur.fetchone()
+            if signup_row and signup_row[0] and len(signup_row[0]) > 4:
+                name = signup_row[0]
+            else:
+                api_name = fetch_group_member_name(uid, group_id)
+                if api_name:
+                    name = api_name
+        if not name:
+            name = uid[-4:]
+        display_name = name
+        name_prefix = "" if len(name) <= 4 else "@"
+        member_tag = " [年缴]" if is_yearly_member(uid, group_id) else ""
+        msg += f"{idx}. {name_prefix}{display_name} ({count}人){member_tag}\n"
+    msg += "----------------------\n"
+    msg += f"👥 报名：{total_count} 人 / 上限：{limit} 人"
+    return msg
+
+def auto_end_event(group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
+        cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+        return True
+    except:
+        return False
+
+def run_auto_schedule():
+    if not should_auto_trigger():
+        return
+    
+    active_groups = get_active_groups()
+    if not active_groups:
+        return
+    
+    taiwan_tz = timezone(timedelta(hours=8))
+    now = datetime.now(taiwan_tz)
+    set_last_auto_trigger_date(now.strftime("%Y-%m-%d"))
+    
+    for group_id in active_groups:
+        try:
+            list_msg = build_list_message(group_id)
+            if list_msg:
+                line_bot_api.push_message(group_id, TextSendMessage(text=list_msg))
+            time.sleep(0.5)
+            auto_end_event(group_id)
+            line_bot_api.push_message(group_id, TextSendMessage(text="✅ 活动已结束（自动排程）"))
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"[AUTO] Error for group {group_id}: {e}")
+
 def atomic_signup(user_id, group_id, name=""):
     cur = get_cursor()
     if not cur:
@@ -577,6 +729,10 @@ def get_mentioned_users(event, exclude_id=None):
 
 @app.get("/")
 async def health_check():
+    try:
+        run_auto_schedule()
+    except Exception as e:
+        print(f"[AUTO] Health check error: {e}")
     return "OK"
 
 @app.get("/me")
@@ -780,7 +936,12 @@ def handle_message(event):
             msg += "活動結束：提早結束活動\n"
             msg += "全部帳單：查看所有群組的欠款\n"
             msg += "退出群組：清除資料並退出\n"
-            msg += "狀態：查看系統狀態"
+            msg += "狀態：查看系統狀態\n"
+            msg += "\n【自動排程】\n"
+            msg += "自動排程查看：查看目前設定\n"
+            msg += "自動排程設定 [天數] [時間]：設定（如 1,4 18:00）\n"
+            msg += "自動排程關閉：關閉自動執行\n"
+            msg += "自動排程測試：立即測試執行"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
@@ -1075,6 +1236,102 @@ def handle_message(event):
             return
         cur.execute("DELETE FROM yearly_members WHERE group_id=%s", (group_id,))
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已移除全部 {count} 位年繳會員"))
+        return
+
+    if text == "自動排程查看" and user_id == ADMIN_ID:
+        days_str = get_auto_schedule_config('auto_schedule_days') or ""
+        time_str = get_auto_schedule_config('auto_schedule_time') or ""
+        
+        if not days_str or not time_str:
+            msg = "⏰ 自動排程設定：\n"
+            msg += "  狀態：已關閉\n"
+            msg += "  請使用「自動排程設定」指令開啟"
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+            return
+        
+        enabled = "已開啟" if days_str else "已關閉"
+        
+        day_names = {1: "週一", 2: "週二", 3: "週三", 4: "週四", 5: "週五", 6: "週六", 7: "週日"}
+        try:
+            days_list = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+            days_display = ", ".join([day_names.get(d, str(d)) for d in days_list])
+        except:
+            days_display = days_str
+        
+        msg = f"⏰ 自動排程設定：\n"
+        msg += f"  狀態：{enabled}\n"
+        msg += f"  執行日：{days_display}\n"
+        msg += f"  執行時間：{time_str}"
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
+    if text.startswith("自動排程設定") and user_id == ADMIN_ID:
+        parts = text.replace("自動排程設定", "").strip()
+        if not parts:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：自動排程設定 1,4 18:00\n（數字 1-7 代表週一至週日）"))
+            return
+        try:
+            parts_list = parts.split()
+            if len(parts_list) < 2:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：自動排程設定 1,4 18:00"))
+                return
+            days_part = parts_list[0]
+            time_part = parts_list[1]
+            
+            days_list = [int(d.strip()) for d in days_part.split(',') if d.strip().isdigit()]
+            if not days_list or any(d < 1 or d > 7 for d in days_list):
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 日期格式錯誤，請使用 1-7 的數字（逗號分隔）"))
+                return
+            
+            time_parts = time_part.split(':')
+            if len(time_parts) != 2:
+                raise ValueError
+            hour = int(time_parts[0])
+            minute = int(time_parts[1])
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                raise ValueError
+            
+            set_auto_schedule_config('auto_schedule_days', days_part)
+            set_auto_schedule_config('auto_schedule_time', time_part)
+            
+            day_names = {1: "週一", 2: "週二", 3: "週三", 4: "週四", 5: "週五", 6: "週六", 7: "週日"}
+            days_display = ", ".join([day_names.get(d, str(d)) for d in days_list])
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 自動排程已設定：\n  執行日：{days_display}\n  執行時間：{time_part}"))
+        except:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：自動排程設定 1,4 18:00"))
+        return
+
+    if text == "自動排程關閉" and user_id == ADMIN_ID:
+        set_auto_schedule_config('auto_schedule_days', '')
+        set_auto_schedule_config('auto_schedule_time', '')
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 自動排程已關閉"))
+        return
+
+    if text == "自動排程測試" and user_id == ADMIN_ID:
+        taiwan_tz = timezone(timedelta(hours=8))
+        now = datetime.now(taiwan_tz)
+        test_minute = (now.minute + 1) % 60
+        test_hour = now.hour if now.minute < 59 else (now.hour + 1) % 24
+        test_time = f"{test_hour:02d}:{test_minute:02d}"
+        
+        set_auto_schedule_config('auto_schedule_days', str(now.weekday() + 1))
+        set_auto_schedule_config('auto_schedule_time', test_time)
+        
+        active_groups = get_active_groups()
+        if active_groups:
+            for gid in active_groups:
+                try:
+                    list_msg = build_list_message(gid)
+                    if list_msg:
+                        line_bot_api.push_message(gid, TextSendMessage(text=list_msg))
+                    time.sleep(0.5)
+                    auto_end_event(gid)
+                    line_bot_api.push_message(gid, TextSendMessage(text="✅ 活動已結束（測試模式）"))
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"[TEST] Error for group {gid}: {e}")
+        
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 測試完成\n\n已設定排程：{test_time}（今天），下次 cron ping 將自動觸發"))
         return
 
     if text == "查帳":
