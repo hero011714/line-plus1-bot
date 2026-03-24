@@ -590,11 +590,14 @@ def build_list_message(group_id):
     cur = get_cursor()
     if not cur:
         return None
+    if not is_event_active(group_id):
+        return None
     cur.execute("""
-        SELECT user_id, name, count
-        FROM users
-        WHERE group_id = %s AND count > 0
-        ORDER BY count DESC
+        SELECT s.user_id, COALESCE(u.name, s.name), COALESCE(u.count, 0)
+        FROM signups s
+        LEFT JOIN users u ON s.user_id = u.user_id AND s.group_id = u.group_id
+        WHERE s.group_id = %s
+        ORDER BY COALESCE(u.count, 0) DESC
     """, (group_id,))
     rows = cur.fetchall()
     
@@ -1351,15 +1354,19 @@ def handle_message(event):
         return
 
     if text == "名單":
+        if not is_event_active(group_id):
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="目前沒有進行中的活動"))
+            return
         cur = get_cursor()
         if not cur:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
             return
         cur.execute("""
-            SELECT user_id, name, count
-            FROM users
-            WHERE group_id = %s AND count > 0
-            ORDER BY count DESC
+            SELECT s.user_id, COALESCE(u.name, s.name), COALESCE(u.count, 0)
+            FROM signups s
+            LEFT JOIN users u ON s.user_id = u.user_id AND s.group_id = u.group_id
+            WHERE s.group_id = %s
+            ORDER BY COALESCE(u.count, 0) DESC
         """, (group_id,))
         rows = cur.fetchall()
         
