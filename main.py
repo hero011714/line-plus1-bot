@@ -549,21 +549,33 @@ def should_auto_trigger():
     taiwan_tz = timezone(timedelta(hours=8))
     now = datetime.now(taiwan_tz)
     today_str = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%H:%M")
+    
+    print(f"[AUTO] Checking trigger at {current_time} (Taiwan)")
     
     last_trigger = get_last_auto_trigger_date()
+    print(f"[AUTO] Last trigger: {last_trigger}, Today: {today_str}")
     if last_trigger == today_str:
+        print(f"[AUTO] Already triggered today, skip")
         return False
     
     days_str = get_auto_schedule_config('auto_schedule_days')
+    print(f"[AUTO] Scheduled days: {days_str}")
     if not days_str:
+        print(f"[AUTO] No schedule days set")
         return False
     
     scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
-    if now.weekday() + 1 not in scheduled_days:
+    current_weekday = now.weekday() + 1
+    print(f"[AUTO] Current weekday: {current_weekday}, Scheduled: {scheduled_days}")
+    if current_weekday not in scheduled_days:
+        print(f"[AUTO] Today is not a scheduled day")
         return False
     
     time_str = get_auto_schedule_config('auto_schedule_time')
+    print(f"[AUTO] Scheduled time: {time_str}")
     if not time_str:
+        print(f"[AUTO] No schedule time set")
         return False
     
     try:
@@ -574,15 +586,21 @@ def should_auto_trigger():
         current_minute = now.minute
         
         window_end = target_minute + 30
+        print(f"[AUTO] Target: {target_hour}:{target_minute:02d}, Current: {current_hour}:{current_minute:02d}, Window end: {window_end}")
+        
+        will_trigger = False
         if window_end >= 60:
             if (current_hour == target_hour and current_minute >= target_minute) or \
                (current_hour == target_hour + 1 and current_minute <= window_end - 60):
-                return True
+                will_trigger = True
         else:
             if current_hour == target_hour and target_minute <= current_minute <= window_end:
-                return True
-    except:
-        pass
+                will_trigger = True
+        
+        print(f"[AUTO] Will trigger: {will_trigger}")
+        return will_trigger
+    except Exception as e:
+        print(f"[AUTO] Error: {e}")
     
     return False
 
@@ -639,25 +657,34 @@ def auto_end_event(group_id):
         return False
 
 def run_auto_schedule():
+    print(f"[AUTO] run_auto_schedule() called")
     if not should_auto_trigger():
+        print(f"[AUTO] should_auto_trigger() returned False")
         return
     
+    print(f"[AUTO] should_auto_trigger() returned True, checking active groups")
     active_groups = get_active_groups()
+    print(f"[AUTO] Active groups: {active_groups}")
     if not active_groups:
+        print(f"[AUTO] No active groups, returning")
         return
     
     taiwan_tz = timezone(timedelta(hours=8))
     now = datetime.now(taiwan_tz)
     set_last_auto_trigger_date(now.strftime("%Y-%m-%d"))
+    print(f"[AUTO] Triggering for {len(active_groups)} groups")
     
     for group_id in active_groups:
         try:
+            print(f"[AUTO] Processing group: {group_id}")
             list_msg = build_list_message(group_id)
             if list_msg:
+                print(f"[AUTO] Sending list message to {group_id}")
                 line_bot_api.push_message(group_id, TextSendMessage(text=list_msg))
             time.sleep(0.5)
             auto_end_event(group_id)
             line_bot_api.push_message(group_id, TextSendMessage(text="✅ 活动已结束（自动排程）"))
+            print(f"[AUTO] Event ended for {group_id}")
             time.sleep(0.5)
         except Exception as e:
             print(f"[AUTO] Error for group {group_id}: {e}")
@@ -736,6 +763,7 @@ async def health_check_head():
 
 @app.get("/")
 async def health_check():
+    print("[AUTO] / endpoint called")
     try:
         run_auto_schedule()
     except Exception as e:
@@ -883,9 +911,11 @@ def handle_message(event):
                             return
                         cur = get_cursor()
                         if cur:
-                            cur.execute("UPDATE users SET count = count - %s WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
-                            cur.execute("UPDATE events SET total_count = total_count - %s WHERE group_id=%s", (n, group_id))
+                            cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
+                            cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, group_id))
                         new_count = get_total_count(group_id)
+                        if new_count < 0:
+                            new_count = 0
                         if current_count - n == 0:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"本次不報名（@{target_name}），累計人數 {new_count} 人"))
                         else:
@@ -1478,9 +1508,11 @@ def handle_message(event):
             return
         cur = get_cursor()
         if cur:
-            cur.execute("UPDATE users SET count = count - %s WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
-            cur.execute("UPDATE events SET total_count = total_count - %s WHERE group_id=%s", (n, group_id))
+            cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+            cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, group_id))
         count = get_total_count(group_id)
+        if count < 0:
+            count = 0
         if current_count - n == 0:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"本次不報名，累計人數 {count} 人"))
         else:
