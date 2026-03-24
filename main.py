@@ -553,23 +553,11 @@ def should_auto_trigger():
     
     print(f"[AUTO] Checking trigger at {current_time} (Taiwan)")
     
-    last_trigger = get_last_auto_trigger_date()
-    print(f"[AUTO] Last trigger: {last_trigger}, Today: {today_str}")
-    if last_trigger == today_str:
-        print(f"[AUTO] Already triggered today, skip")
-        return False
-    
+    # Step 1: Check if schedule is configured
     days_str = get_auto_schedule_config('auto_schedule_days')
     print(f"[AUTO] Scheduled days: {days_str}")
     if not days_str:
         print(f"[AUTO] No schedule days set")
-        return False
-    
-    scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
-    current_weekday = now.weekday() + 1
-    print(f"[AUTO] Current weekday: {current_weekday}, Scheduled: {scheduled_days}")
-    if current_weekday not in scheduled_days:
-        print(f"[AUTO] Today is not a scheduled day")
         return False
     
     time_str = get_auto_schedule_config('auto_schedule_time')
@@ -578,6 +566,15 @@ def should_auto_trigger():
         print(f"[AUTO] No schedule time set")
         return False
     
+    # Step 2: Check if today is the scheduled weekday
+    scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+    current_weekday = now.weekday() + 1
+    print(f"[AUTO] Current weekday: {current_weekday}, Scheduled: {scheduled_days}")
+    if current_weekday not in scheduled_days:
+        print(f"[AUTO] Today is not a scheduled day")
+        return False
+    
+    # Step 3: Check if current time is within trigger window
     try:
         time_parts = time_str.split(':')
         target_hour = int(time_parts[0])
@@ -588,21 +585,31 @@ def should_auto_trigger():
         window_end = target_minute + 30
         print(f"[AUTO] Target: {target_hour}:{target_minute:02d}, Current: {current_hour}:{current_minute:02d}, Window end: {window_end}")
         
-        will_trigger = False
+        in_window = False
         if window_end >= 60:
             if (current_hour == target_hour and current_minute >= target_minute) or \
                (current_hour == target_hour + 1 and current_minute <= window_end - 60):
-                will_trigger = True
+                in_window = True
         else:
             if current_hour == target_hour and target_minute <= current_minute <= window_end:
-                will_trigger = True
+                in_window = True
         
-        print(f"[AUTO] Will trigger: {will_trigger}")
-        return will_trigger
+        print(f"[AUTO] In time window: {in_window}")
+        if not in_window:
+            return False
     except Exception as e:
-        print(f"[AUTO] Error: {e}")
+        print(f"[AUTO] Error checking time: {e}")
+        return False
     
-    return False
+    # Step 4: Check if already triggered today
+    last_trigger = get_last_auto_trigger_date()
+    print(f"[AUTO] Last trigger: {last_trigger}, Today: {today_str}")
+    if last_trigger == today_str:
+        print(f"[AUTO] Already triggered today, skip")
+        return False
+    
+    print(f"[AUTO] All checks passed, will trigger!")
+    return True
 
 def build_list_message(group_id):
     cur = get_cursor()
