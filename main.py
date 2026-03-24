@@ -1007,9 +1007,7 @@ def handle_message(event):
             msg += "\n【自動排程】\n"
             msg += "自動排程查看：查看目前設定\n"
             msg += "自動排程設定 [天數] [時間]：設定（如 1,4 18:00）\n"
-            msg += "自動排程關閉：關閉自動執行\n"
-            msg += "自動排程測試：設定最近時間測試\n"
-            msg += "自動排程立即執行：立即執行名單+結束"
+            msg += "自動排程關閉：關閉自動執行"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
@@ -1375,60 +1373,6 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 自動排程已關閉"))
         return
 
-    if text == "自動排程測試" and user_id == ADMIN_ID:
-        taiwan_tz = timezone(timedelta(hours=8))
-        now = datetime.now(taiwan_tz)
-        test_minute = (now.minute + 1) % 60
-        test_hour = now.hour if now.minute < 59 else (now.hour + 1) % 24
-        test_time = f"{test_hour:02d}:{test_minute:02d}"
-        
-        # Clear last trigger date to allow multiple tests per day
-        set_auto_schedule_config('auto_last_trigger', '')
-        set_auto_schedule_config('auto_schedule_days', str(now.weekday() + 1))
-        set_auto_schedule_config('auto_schedule_time', test_time)
-        
-        active_groups = get_active_groups()
-        if active_groups:
-            for gid in active_groups:
-                try:
-                    list_msg = build_list_message(gid)
-                    if list_msg:
-                        line_bot_api.push_message(gid, TextSendMessage(text=list_msg))
-                    time.sleep(0.5)
-                    auto_end_event(gid)
-                    line_bot_api.push_message(gid, TextSendMessage(text="✅ 活動已結束（測試模式）"))
-                    time.sleep(0.5)
-                except Exception as e:
-                    print(f"[TEST] Error for group {gid}: {e}")
-        
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 測試完成\n\n已設定排程：{test_time}（今天），下次 cron ping 將自動觸發"))
-        return
-
-    if text == "自動排程立即執行" and user_id == ADMIN_ID:
-        # Manually trigger auto schedule immediately (bypass time check)
-        set_auto_schedule_config('auto_last_trigger', '')
-        active_groups = get_active_groups()
-        if not active_groups:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="⚠️ 目前沒有進行中的活動"))
-            return
-        
-        executed = 0
-        for gid in active_groups:
-            try:
-                list_msg = build_list_message(gid)
-                if list_msg:
-                    line_bot_api.push_message(gid, TextSendMessage(text=list_msg))
-                time.sleep(0.5)
-                auto_end_event(gid)
-                line_bot_api.push_message(gid, TextSendMessage(text="✅ 活動已結束（立即執行）"))
-                time.sleep(0.5)
-                executed += 1
-            except Exception as e:
-                print(f"[AUTO-IMMEDIATE] Error for group {gid}: {e}")
-        
-        line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已對 {executed} 個群組執行「名單」+「活動結束」"))
-        return
-
     if text == "查帳":
         count = get_count(user_id, group_id)
         if is_yearly_member(user_id, group_id):
@@ -1553,12 +1497,10 @@ def handle_message(event):
                 n = int(text.lstrip("-"))
             except:
                 n = 0
-        print(f"[DEBUG] Minus command: text={text}, n={n}")
         if n <= 0:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、-5）"))
             return
         current_count = get_signup_count_for_user(user_id, group_id)
-        print(f"[DEBUG] current_count={current_count}, n={n}, check={n > current_count}")
         if n > current_count:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 次數不足，目前最多可扣 {current_count} 次"))
             return
