@@ -89,6 +89,7 @@ def init_tables():
                 user_id TEXT NOT NULL,
                 group_id TEXT NOT NULL,
                 name TEXT DEFAULT '',
+                count INTEGER DEFAULT 1,
                 signup_time INTEGER DEFAULT 0,
                 PRIMARY KEY (user_id, group_id)
             )
@@ -121,6 +122,12 @@ def init_tables():
         """)
         if cur.fetchone():
             cur.execute("ALTER TABLE signups DROP COLUMN expires_at")
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='signups' AND column_name='count'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE signups ADD COLUMN count INTEGER DEFAULT 1")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
@@ -282,6 +289,9 @@ def add_count(user_id, group_id, n=1, name=""):
             ON CONFLICT (user_id, group_id) 
             DO UPDATE SET count = users.count + EXCLUDED.count
         """, (user_id, group_id, name, n))
+        cur.execute("""
+            UPDATE signups SET count = count + %s WHERE user_id = %s AND group_id = %s
+        """, (n, user_id, group_id))
     except:
         pass
 
@@ -401,8 +411,8 @@ def coach_open_event(user_id, group_id, user_name):
             VALUES (%s, %s, %s, 1)
         """, (group_id, now, expires))
         cur.execute("""
-            INSERT INTO signups (user_id, group_id, name, signup_time)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO signups (user_id, group_id, name, count, signup_time)
+            VALUES (%s, %s, %s, 1, %s)
         """, (user_id, group_id, user_name, now))
         cur.execute("""
             INSERT INTO users (user_id, group_id, name, count, last_fetch)
@@ -433,7 +443,7 @@ def get_total_count(group_id):
     if not cur:
         return 0
     try:
-        cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
+        cur.execute("SELECT COALESCE(SUM(count), 0) FROM signups WHERE group_id=%s", (group_id,))
         result = cur.fetchone()
         return result[0] if result else 0
     except:
@@ -615,11 +625,11 @@ def build_list_message(group_id):
     if not is_event_active(group_id):
         return None
     cur.execute("""
-        SELECT s.user_id, COALESCE(u.name, s.name), COALESCE(u.count, 0)
+        SELECT s.user_id, COALESCE(u.name, s.name), COALESCE(s.count, 0)
         FROM signups s
         LEFT JOIN users u ON s.user_id = u.user_id AND s.group_id = u.group_id
         WHERE s.group_id = %s
-        ORDER BY COALESCE(u.count, 0) DESC
+        ORDER BY COALESCE(s.count, 0) DESC
     """, (group_id,))
     rows = cur.fetchall()
     
@@ -730,10 +740,10 @@ def atomic_signup(user_id, group_id, name=""):
         if not result or result[0] != 'ok':
             return False
         cur.execute("""
-            INSERT INTO signups (user_id, group_id, name, signup_time)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO signups (user_id, group_id, name, count, signup_time)
+            VALUES (%s, %s, %s, 1, %s)
             ON CONFLICT (user_id, group_id)
-            DO UPDATE SET name = EXCLUDED.name
+            DO UPDATE SET name = EXCLUDED.name, count = 1
         """, (user_id, group_id, name, now))
         return True
     except Exception as e:
@@ -916,6 +926,7 @@ def handle_message(event):
                         cur = get_cursor()
                         if cur:
                             cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
+                            cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
                             cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, group_id))
                         new_count = get_total_count(group_id)
                         if new_count < 0:
@@ -1424,11 +1435,11 @@ def handle_message(event):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 資料庫連線失敗"))
             return
         cur.execute("""
-            SELECT s.user_id, COALESCE(u.name, s.name), COALESCE(u.count, 0)
+            SELECT s.user_id, COALESCE(u.name, s.name), COALESCE(s.count, 0)
             FROM signups s
             LEFT JOIN users u ON s.user_id = u.user_id AND s.group_id = u.group_id
             WHERE s.group_id = %s
-            ORDER BY COALESCE(u.count, 0) DESC
+            ORDER BY COALESCE(s.count, 0) DESC
         """, (group_id,))
         rows = cur.fetchall()
         
@@ -1543,6 +1554,7 @@ def handle_message(event):
         cur = get_cursor()
         if cur:
             cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
+            cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
             cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, group_id))
         count = get_total_count(group_id)
         if count < 0:
