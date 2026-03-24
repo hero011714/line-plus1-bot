@@ -535,7 +535,9 @@ def get_active_groups():
     try:
         now = int(time.time())
         cur.execute("SELECT group_id FROM events WHERE expires_at > %s", (now,))
-        return [row[0] for row in cur.fetchall()]
+        all_groups = [row[0] for row in cur.fetchall()]
+        # Filter out private chats (they start with 'private_')
+        return [g for g in all_groups if not g.startswith('private_')]
     except:
         return []
 
