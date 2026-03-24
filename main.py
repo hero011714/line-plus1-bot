@@ -727,6 +727,10 @@ def get_mentioned_users(event, exclude_id=None):
                 mentioned.append((m.user_id, name))
     return mentioned, group_id
 
+@app.head("/")
+async def health_check_head():
+    return "OK"
+
 @app.get("/")
 async def health_check():
     try:
@@ -747,6 +751,10 @@ def handle_join(event):
 
 有任何問題請輸入「幫助」查看完整指令列表！"""
     line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+
+@app.head("/callback")
+async def callback_head():
+    return "OK"
 
 @app.post("/callback")
 async def callback(request: Request):
