@@ -306,6 +306,17 @@ def get_count(user_id, group_id):
     except:
         return 0
 
+def get_signup_count_for_user(user_id, group_id):
+    cur = get_cursor()
+    if not cur:
+        return 0
+    try:
+        cur.execute("SELECT count FROM signups WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+        result = cur.fetchone()
+        return result[0] if result else 0
+    except:
+        return 0
+
 def clear_user(user_id, group_id):
     cur = get_cursor()
     if not cur:
@@ -919,7 +930,7 @@ def handle_message(event):
                             name_display = f"@{target_name}" if target_name else target_user_id[-4:]
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"{name_display} 尚未報到"))
                             return
-                        current_count = get_count(target_user_id, group_id)
+                        current_count = get_signup_count_for_user(target_user_id, group_id)
                         if n > current_count:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 次數不足，@{target_name} 目前最多可扣 {current_count} 次"))
                             return
@@ -1546,7 +1557,7 @@ def handle_message(event):
         if n <= 0:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、-5）"))
             return
-        current_count = get_count(user_id, group_id)
+        current_count = get_signup_count_for_user(user_id, group_id)
         print(f"[DEBUG] current_count={current_count}, n={n}, check={n > current_count}")
         if n > current_count:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 次數不足，目前最多可扣 {current_count} 次"))
