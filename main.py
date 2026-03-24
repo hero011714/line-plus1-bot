@@ -1529,10 +1529,12 @@ def handle_message(event):
                 n = int(text.lstrip("-"))
             except:
                 n = 0
+        print(f"[DEBUG] Minus command: text={text}, n={n}")
         if n <= 0:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請輸入有效整數（如 -、-5）"))
             return
         current_count = get_count(user_id, group_id)
+        print(f"[DEBUG] current_count={current_count}, n={n}, check={n > current_count}")
         if n > current_count:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 次數不足，目前最多可扣 {current_count} 次"))
             return
