@@ -574,27 +574,27 @@ def should_auto_trigger():
     today_str = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M")
     
-    print(f"[AUTO] Checking trigger at {current_time} (Taiwan)")
+    # DEBUG: print(f"[AUTO] Checking trigger at {current_time} (Taiwan)")
     
     # Step 1: Check if schedule is configured
     days_str = get_auto_schedule_config('auto_schedule_days')
-    print(f"[AUTO] Scheduled days: {days_str}")
+    # DEBUG: print(f"[AUTO] Scheduled days: {days_str}")
     if not days_str:
-        print(f"[AUTO] No schedule days set")
+        # DEBUG: print(f"[AUTO] No schedule days set")
         return False
     
     time_str = get_auto_schedule_config('auto_schedule_time')
-    print(f"[AUTO] Scheduled time: {time_str}")
+    # DEBUG: print(f"[AUTO] Scheduled time: {time_str}")
     if not time_str:
-        print(f"[AUTO] No schedule time set")
+        # DEBUG: print(f"[AUTO] No schedule time set")
         return False
     
     # Step 2: Check if today is the scheduled weekday
     scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
     current_weekday = now.weekday() + 1
-    print(f"[AUTO] Current weekday: {current_weekday}, Scheduled: {scheduled_days}")
+    # DEBUG: print(f"[AUTO] Current weekday: {current_weekday}, Scheduled: {scheduled_days}")
     if current_weekday not in scheduled_days:
-        print(f"[AUTO] Today is not a scheduled day")
+        # DEBUG: print(f"[AUTO] Today is not a scheduled day")
         return False
     
     # Step 3: Check if current time is within trigger window
@@ -606,7 +606,7 @@ def should_auto_trigger():
         current_minute = now.minute
         
         window_end = target_minute + 30
-        print(f"[AUTO] Target: {target_hour}:{target_minute:02d}, Current: {current_hour}:{current_minute:02d}, Window end: {window_end}")
+        # DEBUG: print(f"[AUTO] Target: {target_hour}:{target_minute:02d}, Current: {current_hour}:{current_minute:02d}, Window end: {window_end}")
         
         in_window = False
         if window_end >= 60:
@@ -617,16 +617,14 @@ def should_auto_trigger():
             if current_hour == target_hour and target_minute <= current_minute <= window_end:
                 in_window = True
         
-        print(f"[AUTO] In time window: {in_window}")
+        # DEBUG: print(f"[AUTO] In time window: {in_window}")
         if not in_window:
             return False
     except Exception as e:
-        print(f"[AUTO] Error checking time: {e}")
+        # DEBUG: print(f"[AUTO] Error checking time: {e}")
         return False
     
-    # Step 4: Record trigger time (but allow multiple triggers in same window)
-    # This is mainly for debugging purposes
-    print(f"[AUTO] In time window, will trigger!")
+    # DEBUG: print(f"[AUTO] In time window, will trigger!")
     return True
 
 def build_list_message(group_id):
@@ -682,37 +680,38 @@ def auto_end_event(group_id):
         return False
 
 def run_auto_schedule():
-    print(f"[AUTO] run_auto_schedule() called")
+    # DEBUG: print(f"[AUTO] run_auto_schedule() called")
     if not should_auto_trigger():
-        print(f"[AUTO] should_auto_trigger() returned False")
+        # DEBUG: print(f"[AUTO] should_auto_trigger() returned False")
         return
     
-    print(f"[AUTO] should_auto_trigger() returned True, checking active groups")
+    # DEBUG: print(f"[AUTO] should_auto_trigger() returned True, checking active groups")
     active_groups = get_active_groups()
-    print(f"[AUTO] Active groups: {active_groups}")
+    # DEBUG: print(f"[AUTO] Active groups: {active_groups}")
     if not active_groups:
-        print(f"[AUTO] No active groups, returning")
+        # DEBUG: print(f"[AUTO] No active groups, returning")
         return
     
     taiwan_tz = timezone(timedelta(hours=8))
     now = datetime.now(taiwan_tz)
     set_last_auto_trigger_date(now.strftime("%Y-%m-%d"))
-    print(f"[AUTO] Triggering for {len(active_groups)} groups")
+    # DEBUG: print(f"[AUTO] Triggering for {len(active_groups)} groups")
     
     for group_id in active_groups:
         try:
-            print(f"[AUTO] Processing group: {group_id}")
+            # DEBUG: print(f"[AUTO] Processing group: {group_id}")
             list_msg = build_list_message(group_id)
             if list_msg:
-                print(f"[AUTO] Sending list message to {group_id}")
+                # DEBUG: print(f"[AUTO] Sending list message to {group_id}")
                 line_bot_api.push_message(group_id, TextSendMessage(text=list_msg))
             time.sleep(0.5)
             auto_end_event(group_id)
             line_bot_api.push_message(group_id, TextSendMessage(text="✅ 活动已结束（自动排程）"))
-            print(f"[AUTO] Event ended for {group_id}")
+            # DEBUG: print(f"[AUTO] Event ended for {group_id}")
             time.sleep(0.5)
         except Exception as e:
-            print(f"[AUTO] Error for group {group_id}: {e}")
+            # DEBUG: print(f"[AUTO] Error for group {group_id}: {e}")
+            pass
 
 def atomic_signup(user_id, group_id, name=""):
     cur = get_cursor()
@@ -788,11 +787,12 @@ async def health_check_head():
 
 @app.get("/")
 async def health_check():
-    print("[AUTO] / endpoint called")
+    # DEBUG: print("[AUTO] / endpoint called")
     try:
         run_auto_schedule()
     except Exception as e:
-        print(f"[AUTO] Health check error: {e}")
+        # DEBUG: print(f"[AUTO] Health check error: {e}")
+        pass
     return "OK"
 
 @app.get("/me")
@@ -894,7 +894,8 @@ def handle_message(event):
                             return
                         limit = get_signup_limit(group_id)
                         current_total = get_total_count(group_id)
-                        if current_total + n > limit:
+                        is_yearly = is_yearly_member(target_user_id, group_id)
+                        if not is_yearly and current_total + n > limit:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
                             return
                         first_signup = not is_signed_up(target_user_id, group_id)
@@ -1462,7 +1463,8 @@ def handle_message(event):
             return
         limit = get_signup_limit(group_id)
         current_total = get_total_count(group_id)
-        if current_total + n > limit:
+        is_yearly = is_yearly_member(user_id, group_id)
+        if not is_yearly and current_total + n > limit:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
             return
         
