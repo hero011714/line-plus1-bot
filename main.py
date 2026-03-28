@@ -634,14 +634,17 @@ def should_auto_open(group_id):
     current_weekday = now.weekday() + 1
     
     days_str = get_auto_open_config(group_id, 'auto_open_days')
+    print(f"[AUTO_OPEN] should_auto_open - group: {group_id[:8] if group_id else 'none'}..., days: {days_str}")
     if not days_str:
         return False
     
     scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+    print(f"[AUTO_OPEN] current weekday: {current_weekday}, scheduled: {scheduled_days}")
     if current_weekday not in scheduled_days:
         return False
     
     time_str = get_auto_open_config(group_id, 'auto_open_time')
+    print(f"[AUTO_OPEN] time: {time_str}")
     if not time_str:
         return False
     
@@ -653,15 +656,18 @@ def should_auto_open(group_id):
         current_minute = now.minute
         
         window_end = target_minute + 30
+        print(f"[AUTO_OPEN] target: {target_hour}:{target_minute:02d}, current: {current_hour}:{current_minute:02d}, window_end: {window_end}")
         in_window = False
         if window_end >= 60:
+            next_hour = (target_hour + 1) % 24
             if (current_hour == target_hour and current_minute >= target_minute) or \
-               (current_hour == target_hour + 1 and current_minute <= window_end - 60):
+               (current_hour == next_hour and current_minute <= window_end - 60):
                 in_window = True
         else:
             if current_hour == target_hour and target_minute <= current_minute <= window_end:
                 in_window = True
         
+        print(f"[AUTO_OPEN] in_window: {in_window}")
         return in_window
     except:
         return False
@@ -943,16 +949,21 @@ def get_mentioned_users(event, exclude_id=None):
 
 def run_auto_open():
     groups = get_groups_with_auto_open()
+    print(f"[AUTO_OPEN] run_auto_open called, groups: {len(groups)}")
     for group_id in groups:
-        if not should_auto_open(group_id):
+        should_trigger = should_auto_open(group_id)
+        print(f"[AUTO_OPEN] should_auto_open({group_id[:8]}...) = {should_trigger}")
+        if not should_trigger:
             continue
         if is_event_active(group_id):
+            print(f"[AUTO_OPEN] Event already active for {group_id[:8]}...")
             continue
         try:
             count = coach_open_event(ADMIN_ID, group_id, "系統", auto_opened=True)
+            print(f"[AUTO_OPEN] Event opened, count: {count}")
             line_bot_api.push_message(group_id, TextSendMessage(text=f"🏀 活動已自動開啟（系統），報名成功，累計人數 {count} 人"))
         except Exception as e:
-            pass
+            print(f"[AUTO_OPEN] Error: {e}")
 
 def check_and_trigger_zero_play():
     taiwan_tz = timezone(timedelta(hours=8))
@@ -970,21 +981,27 @@ def check_and_trigger_zero_play():
     except:
         groups = []
     
+    print(f"[ZERO_PLAY] check_and_trigger_zero_play called, groups: {len(groups)}")
+    
     for group_id in groups:
         try:
             if not is_event_active(group_id):
+                print(f"[ZERO_PLAY] {group_id[:8]}... no active event")
                 continue
             if get_zero_play_open_triggered(group_id):
+                print(f"[ZERO_PLAY] {group_id[:8]}... already triggered")
                 continue
             
             days_str = get_zero_play_open_config(group_id, 'zero_play_open_days')
             time_str = get_zero_play_open_config(group_id, 'zero_play_open_time')
+            print(f"[ZERO_PLAY] {group_id[:8]}... days: {days_str}, time: {time_str}")
             
             if not days_str or not time_str:
                 continue
             
             scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
             if current_weekday not in scheduled_days:
+                print(f"[ZERO_PLAY] {group_id[:8]}... weekday {current_weekday} not in {scheduled_days}")
                 continue
             
             time_parts = time_str.split(':')
@@ -992,23 +1009,27 @@ def check_and_trigger_zero_play():
             target_minute = int(time_parts[1])
             
             window_end = target_minute + 30
+            print(f"[ZERO_PLAY] {group_id[:8]}... target: {target_hour}:{target_minute:02d}, current: {current_hour}:{current_minute:02d}, window_end: {window_end}")
             in_window = False
             if window_end >= 60:
+                next_hour = (target_hour + 1) % 24
                 if (current_hour == target_hour and current_minute >= target_minute) or \
-                   (current_hour == target_hour + 1 and current_minute <= window_end - 60):
+                   (current_hour == next_hour and current_minute <= window_end - 60):
                     in_window = True
             else:
                 if current_hour == target_hour and target_minute <= current_minute <= window_end:
                     in_window = True
             
+            print(f"[ZERO_PLAY] {group_id[:8]}... in_window: {in_window}")
             if in_window:
                 set_zero_play_open_triggered(group_id, True)
+                print(f"[ZERO_PLAY] Triggering zero play open for {group_id[:8]}...")
                 try:
                     line_bot_api.push_message(group_id, TextSendMessage(text="🎉 零打報名+1！現在所有人都可以報名了！"))
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[ZERO_PLAY] Push message error: {e}")
         except Exception as e:
-            pass
+            print(f"[ZERO_PLAY] Error for {group_id[:8]}...: {e}")
 
 @app.head("/")
 async def health_check_head():
