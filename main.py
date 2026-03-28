@@ -407,7 +407,7 @@ def get_event_remaining_hours(group_id):
     except:
         return 0
 
-def coach_open_event(user_id, group_id, user_name):
+def coach_open_event(user_id, group_id, user_name, auto_opened=False):
     conn_local = get_db()
     if not conn_local:
         return 0
@@ -431,12 +431,61 @@ def coach_open_event(user_id, group_id, user_name):
             ON CONFLICT (user_id, group_id)
             DO UPDATE SET count = users.count + 1, name = EXCLUDED.name
         """, (user_id, group_id, user_name))
+        if auto_opened:
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'auto_opened', '1') ON CONFLICT (group_id, key) DO UPDATE SET value = '1'", (group_id,))
+        else:
+            cur.execute("DELETE FROM config WHERE group_id=%s AND key='auto_opened'", (group_id,))
         cur.execute("SELECT total_count FROM events WHERE group_id=%s", (group_id,))
         result = cur.fetchone()
         return result[0] if result else 1
     except Exception as e:
         print(f"coach_open_event error: {e}")
         return 1
+
+def is_event_auto_opened(group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key='auto_opened'", (group_id,))
+        result = cur.fetchone()
+        return result and result[0] == '1'
+    except:
+        return False
+
+def should_allow_signup(user_id, group_id):
+    if not is_event_auto_opened(group_id):
+        return True
+    if is_yearly_member(user_id, group_id):
+        return True
+    if get_zero_play_open_triggered(group_id):
+        return True
+    
+    days_str = get_zero_play_open_config(group_id, 'zero_play_open_days')
+    time_str = get_zero_play_open_config(group_id, 'zero_play_open_time')
+    
+    if days_str and time_str:
+        taiwan_tz = timezone(timedelta(hours=8))
+        now = datetime.now(taiwan_tz)
+        current_weekday = now.weekday() + 1
+        current_hour = now.hour
+        current_minute = now.minute
+        
+        scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+        if current_weekday in scheduled_days:
+            time_parts = time_str.split(':')
+            target_hour = int(time_parts[0])
+            target_minute = int(time_parts[1])
+            
+            if current_hour > target_hour or (current_hour == target_hour and current_minute >= target_minute):
+                return True
+            else:
+                remaining_mins = target_minute - current_minute
+                if current_hour < target_hour:
+                    remaining_mins = (target_hour - current_hour - 1) * 60 + (60 - current_minute) + target_minute
+                return False, remaining_mins
+    
+    return True
 
 def add_total_count(group_id, n):
     cur = get_cursor()
@@ -546,6 +595,117 @@ def set_auto_schedule_config(key, value):
         return
     try:
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', %s, %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (key, value, value))
+    except:
+        pass
+
+def get_auto_open_config(group_id, key):
+    cur = get_cursor()
+    if not cur:
+        return None
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key=%s", (group_id, key))
+        result = cur.fetchone()
+        return result[0] if result else None
+    except:
+        return None
+
+def set_auto_open_config(group_id, key, value):
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, %s, %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, key, value, value))
+    except:
+        pass
+
+def get_groups_with_auto_open():
+    cur = get_cursor()
+    if not cur:
+        return []
+    try:
+        cur.execute("SELECT DISTINCT group_id FROM config WHERE key = 'auto_open_days'")
+        return [row[0] for row in cur.fetchall()]
+    except:
+        return []
+
+def should_auto_open(group_id):
+    taiwan_tz = timezone(timedelta(hours=8))
+    now = datetime.now(taiwan_tz)
+    current_weekday = now.weekday() + 1
+    
+    days_str = get_auto_open_config(group_id, 'auto_open_days')
+    if not days_str:
+        return False
+    
+    scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+    if current_weekday not in scheduled_days:
+        return False
+    
+    time_str = get_auto_open_config(group_id, 'auto_open_time')
+    if not time_str:
+        return False
+    
+    try:
+        time_parts = time_str.split(':')
+        target_hour = int(time_parts[0])
+        target_minute = int(time_parts[1])
+        current_hour = now.hour
+        current_minute = now.minute
+        
+        window_end = target_minute + 30
+        in_window = False
+        if window_end >= 60:
+            if (current_hour == target_hour and current_minute >= target_minute) or \
+               (current_hour == target_hour + 1 and current_minute <= window_end - 60):
+                in_window = True
+        else:
+            if current_hour == target_hour and target_minute <= current_minute <= window_end:
+                in_window = True
+        
+        return in_window
+    except:
+        return False
+
+def get_zero_play_open_config(group_id, key):
+    cur = get_cursor()
+    if not cur:
+        return None
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key=%s", (group_id, key))
+        result = cur.fetchone()
+        return result[0] if result else None
+    except:
+        return None
+
+def set_zero_play_open_config(group_id, key, value):
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, %s, %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, key, value, value))
+    except:
+        pass
+
+def get_zero_play_open_triggered(group_id):
+    cur = get_cursor()
+    if not cur:
+        return False
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key='zero_play_open_triggered'", (group_id,))
+        result = cur.fetchone()
+        return result and result[0] == '1'
+    except:
+        return False
+
+def set_zero_play_open_triggered(group_id, value):
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        if value:
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'zero_play_open_triggered', '1') ON CONFLICT (group_id, key) DO UPDATE SET value = '1'", (group_id,))
+        else:
+            cur.execute("DELETE FROM config WHERE group_id=%s AND key='zero_play_open_triggered'", (group_id,))
     except:
         pass
 
@@ -781,6 +941,75 @@ def get_mentioned_users(event, exclude_id=None):
                 mentioned.append((m.user_id, name))
     return mentioned, group_id
 
+def run_auto_open():
+    groups = get_groups_with_auto_open()
+    for group_id in groups:
+        if not should_auto_open(group_id):
+            continue
+        if is_event_active(group_id):
+            continue
+        try:
+            count = coach_open_event(ADMIN_ID, group_id, "系統", auto_opened=True)
+            line_bot_api.push_message(group_id, TextSendMessage(text=f"🏀 活動已自動開啟（系統），報名成功，累計人數 {count} 人"))
+        except Exception as e:
+            pass
+
+def check_and_trigger_zero_play():
+    taiwan_tz = timezone(timedelta(hours=8))
+    now = datetime.now(taiwan_tz)
+    current_weekday = now.weekday() + 1
+    current_hour = now.hour
+    current_minute = now.minute
+    
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("SELECT DISTINCT group_id FROM config WHERE key = 'zero_play_open_days'")
+        groups = [row[0] for row in cur.fetchall()]
+    except:
+        groups = []
+    
+    for group_id in groups:
+        try:
+            if not is_event_active(group_id):
+                continue
+            if get_zero_play_open_triggered(group_id):
+                continue
+            
+            days_str = get_zero_play_open_config(group_id, 'zero_play_open_days')
+            time_str = get_zero_play_open_config(group_id, 'zero_play_open_time')
+            
+            if not days_str or not time_str:
+                continue
+            
+            scheduled_days = [int(d.strip()) for d in days_str.split(',') if d.strip().isdigit()]
+            if current_weekday not in scheduled_days:
+                continue
+            
+            time_parts = time_str.split(':')
+            target_hour = int(time_parts[0])
+            target_minute = int(time_parts[1])
+            
+            window_end = target_minute + 30
+            in_window = False
+            if window_end >= 60:
+                if (current_hour == target_hour and current_minute >= target_minute) or \
+                   (current_hour == target_hour + 1 and current_minute <= window_end - 60):
+                    in_window = True
+            else:
+                if current_hour == target_hour and target_minute <= current_minute <= window_end:
+                    in_window = True
+            
+            if in_window:
+                set_zero_play_open_triggered(group_id, True)
+                try:
+                    line_bot_api.push_message(group_id, TextSendMessage(text="🎉 零打報名+1！現在所有人都可以報名了！"))
+                except:
+                    pass
+        except Exception as e:
+            pass
+
 @app.head("/")
 async def health_check_head():
     return "OK"
@@ -788,6 +1017,8 @@ async def health_check_head():
 @app.get("/")
 async def health_check(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_auto_schedule)
+    background_tasks.add_task(run_auto_open)
+    background_tasks.add_task(check_and_trigger_zero_play)
     return "OK"
 
 @app.get("/me")
@@ -1003,7 +1234,14 @@ def handle_message(event):
             msg += "\n【自動排程】\n"
             msg += "自動排程查看：查看目前設定\n"
             msg += "自動排程設定 [天數] [時間]：設定（如 1,4 18:00）\n"
-            msg += "自動排程關閉：關閉自動執行"
+            msg += "自動排程關閉：關閉自動執行\n"
+            msg += "\n【開團設定】\n"
+            msg += "開團設定查看：查看目前設定\n"
+            msg += "開團設定 [開團日] [開團時間] [零打日] [零打時間]\n"
+            msg += "  例：開團設定 3 20:00 4 11:30\n"
+            msg += "  開團日=3(週三) 開團時間=20:00\n"
+            msg += "  零打日=4(週四) 零打時間=11:30\n"
+            msg += "開團設定關閉：關閉自動開團和零打"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
 
@@ -1369,6 +1607,107 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 自動排程已關閉"))
         return
 
+    if text == "開團設定查看" and user_id == ADMIN_ID:
+        auto_days = get_auto_open_config(group_id, 'auto_open_days')
+        auto_time = get_auto_open_config(group_id, 'auto_open_time')
+        zero_days = get_zero_play_open_config(group_id, 'zero_play_open_days')
+        zero_time = get_zero_play_open_config(group_id, 'zero_play_open_time')
+        
+        day_names = {1: "週一", 2: "週二", 3: "週三", 4: "週四", 5: "週五", 6: "週六", 7: "週日"}
+        
+        msg = "🏀 開團設定：\n"
+        
+        if auto_days and auto_time:
+            try:
+                days_list = [int(d.strip()) for d in auto_days.split(',') if d.strip().isdigit()]
+                auto_display = ", ".join([day_names.get(d, str(d)) for d in days_list])
+            except:
+                auto_display = auto_days
+            msg += f"  自動開團：{auto_display} {auto_time}\n"
+        else:
+            msg += "  自動開團：未設定\n"
+        
+        if zero_days and zero_time:
+            try:
+                days_list = [int(d.strip()) for d in zero_days.split(',') if d.strip().isdigit()]
+                zero_display = ", ".join([day_names.get(d, str(d)) for d in days_list])
+            except:
+                zero_display = zero_days
+            msg += f"  零打開放：{zero_display} {zero_time}\n"
+        else:
+            msg += "  零打開放：未設定\n"
+        
+        msg += "\n※ 自動開團後僅年繳會員可報名\n"
+        msg += "※ 零打開放後所有人都可報名"
+        
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+        return
+
+    if text.startswith("開團設定") and user_id == ADMIN_ID:
+        parts = text.replace("開團設定", "").strip()
+        if not parts:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30\n（開團日 開團時間 零打日 零打時間）"))
+            return
+        
+        parts_list = parts.split()
+        if len(parts_list) < 4:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30\n（開團日 開團時間 零打日 零打時間）"))
+            return
+        
+        try:
+            open_days = parts_list[0]
+            open_time = parts_list[1]
+            zero_days = parts_list[2]
+            zero_time = parts_list[3]
+            
+            open_days_list = [int(d.strip()) for d in open_days.split(',') if d.strip().isdigit()]
+            if not open_days_list or any(d < 1 or d > 7 for d in open_days_list):
+                raise ValueError
+            
+            zero_days_list = [int(d.strip()) for d in zero_days.split(',') if d.strip().isdigit()]
+            if not zero_days_list or any(d < 1 or d > 7 for d in zero_days_list):
+                raise ValueError
+            
+            open_time_parts = open_time.split(':')
+            if len(open_time_parts) != 2:
+                raise ValueError
+            open_hour = int(open_time_parts[0])
+            open_minute = int(open_time_parts[1])
+            if open_hour < 0 or open_hour > 23 or open_minute < 0 or open_minute > 59:
+                raise ValueError
+            
+            zero_time_parts = zero_time.split(':')
+            if len(zero_time_parts) != 2:
+                raise ValueError
+            zero_hour = int(zero_time_parts[0])
+            zero_minute = int(zero_time_parts[1])
+            if zero_hour < 0 or zero_hour > 23 or zero_minute < 0 or zero_minute > 59:
+                raise ValueError
+            
+            set_auto_open_config(group_id, 'auto_open_days', open_days)
+            set_auto_open_config(group_id, 'auto_open_time', open_time)
+            set_zero_play_open_config(group_id, 'zero_play_open_days', zero_days)
+            set_zero_play_open_config(group_id, 'zero_play_open_time', zero_time)
+            set_zero_play_open_triggered(group_id, False)
+            
+            day_names = {1: "週一", 2: "週二", 3: "週三", 4: "週四", 5: "週五", 6: "週六", 7: "週日"}
+            open_display = ", ".join([day_names.get(d, str(d)) for d in open_days_list])
+            zero_display = ", ".join([day_names.get(d, str(d)) for d in zero_days_list])
+            
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 開團設定已設定：\n  自動開團：{open_display} {open_time}\n  零打開放：{zero_display} {zero_time}\n\n※ 自動開團後僅年繳會員可報名\n※ 零打開放後所有人都可報名"))
+        except:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30"))
+        return
+
+    if text == "開團設定關閉" and user_id == ADMIN_ID:
+        set_auto_open_config(group_id, 'auto_open_days', '')
+        set_auto_open_config(group_id, 'auto_open_time', '')
+        set_zero_play_open_config(group_id, 'zero_play_open_days', '')
+        set_zero_play_open_config(group_id, 'zero_play_open_time', '')
+        set_zero_play_open_triggered(group_id, False)
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 開團設定已關閉"))
+        return
+
     if text == "查帳":
         count = get_count(user_id, group_id)
         if is_yearly_member(user_id, group_id):
@@ -1442,6 +1781,17 @@ def handle_message(event):
         if not is_event_active(group_id):
             line_bot_api.reply_message(reply_token, TextSendMessage(text="活動尚未開始"))
             return
+        
+        allow_result = should_allow_signup(user_id, group_id)
+        if isinstance(allow_result, tuple):
+            allowed, remaining = allow_result
+            if not allowed:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 目前僅開放年繳會員報名，{remaining} 分鐘後開放所有人"))
+                return
+        elif not allow_result:
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="⚠️ 目前僅開放年繳會員報名"))
+            return
+        
         if text == "+":
             n = 1
         else:
