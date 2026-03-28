@@ -1346,6 +1346,7 @@ def handle_message(event):
                 cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
             except:
                 pass
+        set_zero_play_open_triggered(group_id, False)
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 活動已結束"))
         return
 
