@@ -53,6 +53,11 @@ def get_db():
         except Exception as e:
             print(f"Database connection failed: {e}")
             return None
+    else:
+        try:
+            conn.reset()
+        except:
+            pass
     return conn
 
 def get_cursor():
