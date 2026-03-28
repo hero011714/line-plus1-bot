@@ -1329,9 +1329,10 @@ def handle_message(event):
         if cur:
             try:
                 cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+                cur.execute("DELETE FROM config WHERE group_id=%s", (group_id,))
             except:
                 pass
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除所有紀錄資料"))
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 已清除所有紀錄資料（含開團設定）"))
         return
 
     if text == "活動結束" and user_id == ADMIN_ID:
