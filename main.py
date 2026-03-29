@@ -129,7 +129,7 @@ def init_tables():
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
-        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', '12') ON CONFLICT DO NOTHING")
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', '10') ON CONFLICT DO NOTHING")
         print("Tables initialized successfully")
         return True
     except Exception as e:
@@ -874,7 +874,7 @@ def atomic_signup(user_id, group_id, name=""):
                 SELECT COALESCE((
                     SELECT value::int FROM config
                     WHERE group_id='default' AND key='signup_limit'
-                ), 12) AS lim
+                ), 10) AS lim
             ),
             count_check AS (
                 SELECT COUNT(*)::int AS cnt FROM signups WHERE group_id=%s
@@ -1265,8 +1265,8 @@ def handle_message(event):
             msg += "設定報名人數上限 [數字]\n"
             msg += "設定活動時間 [小時]\n"
             msg += "@人 +N / -N：替他人記錄（教練）\n"
-            msg += "已繳 @人：清除用戶帳目（繳費確認）\n"
-            msg += "年繳加入 / 年繳移除 @人：管理年繳會員\n"
+            msg += "已繳 @人：清除用戶帳目（繳費確認，可一次 @多人）\n"
+            msg += "年繳加入 / 年繳移除 @人：管理年繳會員（可一次 @多人）\n"
             msg += "年繳名單：查看年繳會員\n"
             msg += "年繳全部移除：移除所有年繳會員\n"
             msg += "重置全部：清除所有紀錄資料\n"
@@ -1393,34 +1393,29 @@ def handle_message(event):
         return
 
     if text.startswith("已繳") and user_id == ADMIN_ID:
-        target_user_id = None
-        target_name = None
-        
-        # Try to get target from mention
         mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        for m_user_id, m_name in mentioned:
-            target_user_id = m_user_id
-            target_name = m_name
-            break
-        
-        # If no mention, try to find by name
-        if not target_user_id:
+        if mentioned:
+            results = []
+            for m_user_id, m_name in mentioned:
+                clear_user(m_user_id, group_id)
+                name_display = f"@{m_name}" if m_name else m_user_id[-4:]
+                results.append(name_display)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已清除 {', '.join(results)} 的帳目（目前 0 次）"))
+        else:
+            # Try single name
             parts = text.replace("已繳", "").strip()
             if parts.startswith("@"):
                 parts = parts[1:]
             if parts:
                 target_user_id = get_user_by_name(parts, group_id)
-                target_name = parts
-        
-        if target_user_id:
-            clear_user(target_user_id, group_id)
-            if not target_name:
-                target_name = target_user_id[-4:]
-            # For ID fragments (4 chars or less), don't add @ prefix
-            name_display = target_name if len(target_name) <= 4 else f"@{target_name}"
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已清除 {name_display} 的帳目（目前 0 次）"))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式"))
+                if target_user_id:
+                    clear_user(target_user_id, group_id)
+                    name_display = f"@{parts}" if len(parts) > 4 else parts
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已清除 {name_display} 的帳目（目前 0 次）"))
+                else:
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 找不到指定用戶"))
+            else:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「已繳 @人」格式（可一次 @多人）"))
         return
 
     if text == "全部帳單" and user_id == ADMIN_ID:
@@ -1506,49 +1501,53 @@ def handle_message(event):
 
     # Yearly member commands (admin only)
     if text.startswith("年繳加入") and user_id == ADMIN_ID:
-        target_user_id = None
-        target_name = None
         mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        for m_user_id, m_name in mentioned:
-            target_user_id = m_user_id
-            target_name = m_name
-            break
-        if not target_user_id:
+        if mentioned:
+            results = []
+            for m_user_id, m_name in mentioned:
+                add_yearly_member(m_user_id, group_id, m_name or "")
+                name_display = f"@{m_name}" if m_name else m_user_id[-4:]
+                results.append(name_display)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {', '.join(results)} 設為年繳會員"))
+        else:
             parts = text.replace("年繳加入", "").strip()
             if parts.startswith("@"):
                 parts = parts[1:]
             if parts:
                 target_user_id = get_user_by_name(parts, group_id)
-                target_name = parts
-        if target_user_id:
-            add_yearly_member(target_user_id, group_id, target_name or "")
-            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {name_display} 設為年繳會員"))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「年繳加入 @人」格式"))
+                if target_user_id:
+                    add_yearly_member(target_user_id, group_id, parts)
+                    name_display = f"@{parts}" if len(parts) > 4 else parts
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {name_display} 設為年繳會員"))
+                else:
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 找不到指定用戶"))
+            else:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「年繳加入 @人」格式（可一次 @多人）"))
         return
 
     if text.startswith("年繳移除") and user_id == ADMIN_ID:
-        target_user_id = None
-        target_name = None
         mentioned, _ = get_mentioned_users(event, ADMIN_ID)
-        for m_user_id, m_name in mentioned:
-            target_user_id = m_user_id
-            target_name = m_name
-            break
-        if not target_user_id:
+        if mentioned:
+            results = []
+            for m_user_id, m_name in mentioned:
+                remove_yearly_member(m_user_id, group_id)
+                name_display = f"@{m_name}" if m_name else m_user_id[-4:]
+                results.append(name_display)
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {', '.join(results)} 移出年繳會員"))
+        else:
             parts = text.replace("年繳移除", "").strip()
             if parts.startswith("@"):
                 parts = parts[1:]
             if parts:
                 target_user_id = get_user_by_name(parts, group_id)
-                target_name = parts
-        if target_user_id:
-            remove_yearly_member(target_user_id, group_id)
-            name_display = f"@{target_name}" if target_name else target_user_id[-4:]
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {name_display} 移出年繳會員"))
-        else:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「年繳移除 @人」格式"))
+                if target_user_id:
+                    remove_yearly_member(target_user_id, group_id)
+                    name_display = f"@{parts}" if len(parts) > 4 else parts
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已將 {name_display} 移出年繳會員"))
+                else:
+                    line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 找不到指定用戶"))
+            else:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 請使用「年繳移除 @人」格式（可一次 @多人）"))
         return
 
     if text == "年繳名單" and user_id == ADMIN_ID:
