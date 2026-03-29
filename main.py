@@ -48,6 +48,7 @@ def get_db():
     else:
         try:
             conn.reset()
+            conn.autocommit = True
         except:
             pass
     return conn
