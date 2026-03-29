@@ -1008,11 +1008,23 @@ def check_and_trigger_zero_play():
 async def health_check_head():
     return "OK"
 
+def run_all_auto_tasks():
+    try:
+        run_auto_schedule()
+    except Exception as e:
+        print(f"[AUTO] Schedule error: {e}")
+    try:
+        run_auto_open()
+    except Exception as e:
+        print(f"[AUTO] Open error: {e}")
+    try:
+        check_and_trigger_zero_play()
+    except Exception as e:
+        print(f"[AUTO] Zero play error: {e}")
+
 @app.get("/")
 async def health_check(background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_auto_schedule)
-    background_tasks.add_task(run_auto_open)
-    background_tasks.add_task(check_and_trigger_zero_play)
+    background_tasks.add_task(run_all_auto_tasks)
     return "OK"
 
 @app.get("/me")
