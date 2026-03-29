@@ -822,6 +822,7 @@ def auto_end_event(group_id):
     try:
         cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
         cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+        set_zero_play_open_triggered(group_id, False)
         return True
     except:
         return False
