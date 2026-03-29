@@ -829,10 +829,16 @@ def auto_end_event(group_id):
         return False
 
 def run_auto_schedule():
+    taiwan_tz = timezone(timedelta(hours=8))
+    today_str = datetime.now(taiwan_tz).strftime("%Y-%m-%d")
     groups = get_groups_with_schedule()
     print(f"[SCHEDULE] run_auto_schedule called, groups: {len(groups)}")
     for group_id in groups:
         try:
+            last_trigger = get_auto_trigger_date(group_id, 'auto_schedule_triggered_date')
+            if last_trigger == today_str:
+                print(f"[SCHEDULE] {group_id[:8]}... already triggered today")
+                continue
             if not is_event_active(group_id):
                 print(f"[SCHEDULE] {group_id[:8]}... no active event")
                 continue
@@ -847,6 +853,7 @@ def run_auto_schedule():
                 line_bot_api.push_message(group_id, TextSendMessage(text=list_msg))
             time.sleep(0.5)
             auto_end_event(group_id)
+            set_auto_trigger_date(group_id, 'auto_schedule_triggered_date')
             line_bot_api.push_message(group_id, TextSendMessage(text="✅ 活动已结束（自动排程）"))
             print(f"[SCHEDULE] Event ended for {group_id[:8]}...")
             time.sleep(0.5)
@@ -921,10 +928,38 @@ def get_mentioned_users(event, exclude_id=None):
                 mentioned.append((m.user_id, name))
     return mentioned, group_id
 
+def get_auto_trigger_date(group_id, key):
+    cur = get_cursor()
+    if not cur:
+        return None
+    try:
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key=%s", (group_id, key))
+        result = cur.fetchone()
+        return result[0] if result else None
+    except:
+        return None
+
+def set_auto_trigger_date(group_id, key):
+    taiwan_tz = timezone(timedelta(hours=8))
+    today_str = datetime.now(taiwan_tz).strftime("%Y-%m-%d")
+    cur = get_cursor()
+    if not cur:
+        return
+    try:
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, %s, %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, key, today_str, today_str))
+    except:
+        pass
+
 def run_auto_open():
+    taiwan_tz = timezone(timedelta(hours=8))
+    today_str = datetime.now(taiwan_tz).strftime("%Y-%m-%d")
     groups = get_groups_with_auto_open()
     print(f"[AUTO_OPEN] run_auto_open called, groups: {len(groups)}")
     for group_id in groups:
+        last_trigger = get_auto_trigger_date(group_id, 'auto_open_triggered_date')
+        if last_trigger == today_str:
+            print(f"[AUTO_OPEN] {group_id[:8]}... already triggered today")
+            continue
         should_trigger = should_auto_open(group_id)
         print(f"[AUTO_OPEN] should_auto_open({group_id[:8]}...) = {should_trigger}")
         if not should_trigger:
@@ -934,6 +969,7 @@ def run_auto_open():
             continue
         try:
             count = coach_open_event(ADMIN_ID, group_id, "系統", auto_opened=True)
+            set_auto_trigger_date(group_id, 'auto_open_triggered_date')
             print(f"[AUTO_OPEN] Event opened, count: {count}")
             line_bot_api.push_message(group_id, TextSendMessage(text=f"🏀 活動已自動開啟（系統），報名成功，累計人數 {count} 人"))
         except Exception as e:
