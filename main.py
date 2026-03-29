@@ -5,7 +5,7 @@ import asyncio
 import time
 import psutil
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, JoinEvent
 from linebot.exceptions import InvalidSignatureError
@@ -786,13 +786,8 @@ async def health_check_head():
     return "OK"
 
 @app.get("/")
-async def health_check():
-    # DEBUG: print("[AUTO] / endpoint called")
-    try:
-        run_auto_schedule()
-    except Exception as e:
-        # DEBUG: print(f"[AUTO] Health check error: {e}")
-        pass
+async def health_check(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_auto_schedule)
     return "OK"
 
 @app.get("/me")
