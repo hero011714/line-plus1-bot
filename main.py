@@ -24,17 +24,9 @@ def get_bot_user_id():
     if _bot_user_id:
         return _bot_user_id
     try:
-        import requests as _requests
-        resp = _requests.get(
-            "https://api.line.me/v2/profile",
-            headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            _bot_user_id = resp.json().get("userId")
-            print(f"[BOT_ID] Cached: {_bot_user_id}")
-        else:
-            print(f"[BOT_ID] Failed: {resp.status_code}")
+        bot_info = line_bot_api.get_bot_info()
+        _bot_user_id = bot_info.user_id
+        print(f"[BOT_ID] Cached: {_bot_user_id}")
     except Exception as e:
         print(f"[BOT_ID] Error: {e}")
     return _bot_user_id
