@@ -421,8 +421,11 @@ def coach_open_event(user_id, group_id, user_name, auto_opened=False):
         """, (group_id, now, expires))
         cur.execute("""
             INSERT INTO signups (user_id, group_id, name, count, signup_time)
-            VALUES (%s, %s, %s, 1, %s)
+            VALUES (%s, %s, %s, 0, %s)
         """, (user_id, group_id, user_name, now))
+        cur.execute("""
+            UPDATE signups SET count = count + 1 WHERE user_id = %s AND group_id = %s
+        """, (user_id, group_id))
         cur.execute("""
             INSERT INTO users (user_id, group_id, name, count, last_fetch)
             VALUES (%s, %s, %s, 1, 0)
@@ -877,7 +880,7 @@ def atomic_signup(user_id, group_id, name=""):
                 ), 10) AS lim
             ),
             count_check AS (
-                SELECT COUNT(*)::int AS cnt FROM signups WHERE group_id=%s
+                SELECT COALESCE(SUM(count), 0)::int AS cnt FROM signups WHERE group_id=%s
             ),
             decision AS (
                 SELECT
@@ -898,9 +901,9 @@ def atomic_signup(user_id, group_id, name=""):
             return False
         cur.execute("""
             INSERT INTO signups (user_id, group_id, name, count, signup_time)
-            VALUES (%s, %s, %s, 1, %s)
+            VALUES (%s, %s, %s, 0, %s)
             ON CONFLICT (user_id, group_id)
-            DO UPDATE SET name = EXCLUDED.name, count = 1
+            DO UPDATE SET name = EXCLUDED.name, count = 0
         """, (user_id, group_id, name, now))
         return True
     except Exception as e:
@@ -1087,8 +1090,7 @@ async def callback(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
 
     try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, handler.handle, body.decode(), signature)
+        handler.handle(body.decode(), signature)
     except InvalidSignatureError:
         return "Invalid signature"
     except Exception as e:
@@ -1096,6 +1098,270 @@ async def callback(request: Request):
         return "Error"
 
     return "OK"
+
+def run_bot_test(group_id, reply_token, price):
+    TEST_A = "TEST_USER_A"
+    TEST_B = "TEST_USER_B"
+    NAME_A = "測試A"
+    NAME_B = "測試B"
+
+    results = []
+    passed = 0
+    failed = 0
+
+    def check(name, condition, detail=""):
+        nonlocal passed, failed
+        if condition:
+            results.append(f"✅ {name}" + (f"：{detail}" if detail else ""))
+            passed += 1
+        else:
+            results.append(f"❌ {name}" + (f"：{detail}" if detail else ""))
+            failed += 1
+
+    def end_event_test():
+        cur = get_cursor()
+        if cur:
+            cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+
+    def do_minus(uid, gid, n):
+        """扣除 n 次，若扣到 0 則從 signups 刪除"""
+        cur = get_cursor()
+        if not cur:
+            return
+        current = get_signup_count_for_user(uid, gid)
+        cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, uid, gid))
+        cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, gid))
+        if current - n <= 0:
+            cur.execute("DELETE FROM signups WHERE user_id=%s AND group_id=%s", (uid, gid))
+        else:
+            cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, uid, gid))
+
+    try:
+        # ── 清除 ──────────────────────────────────────────
+        clear_group_data(group_id)
+
+        # ═══════════════════════════════════════════════════
+        # Phase 0：活動開始前
+        # ═══════════════════════════════════════════════════
+        results.append("\n【Phase 0 - 活動開始前】")
+
+        # 1. +1 被拒
+        check("+1 拒絕", not is_event_active(group_id), "活動尚未開始")
+        # 2. -1 被拒
+        check("-1 拒絕", not is_event_active(group_id), "活動尚未開始")
+        # 3. 查帳 A
+        count_a = get_count(TEST_A, group_id)
+        check("查帳 A", count_a == 0, f"{count_a}次 {count_a*price}元 正確")
+        # 4. 查帳 B
+        count_b = get_count(TEST_B, group_id)
+        check("查帳 B", count_b == 0, f"{count_b}次 {count_b*price}元 正確")
+        # 5. 名單
+        check("名單", not is_event_active(group_id), "無活動 正確")
+        # 6. 全部帳單
+        check("全部帳單", count_a == 0 and count_b == 0, "無欠款 正確")
+
+        # ═══════════════════════════════════════════════════
+        # Phase 1：活動進行中
+        # ═══════════════════════════════════════════════════
+        results.append("\n【Phase 1 - 活動進行中】")
+
+        # 7. 開團 A
+        coach_open_event(TEST_A, group_id, NAME_A)
+        total = get_total_count(group_id)
+        a_signups = get_signup_count_for_user(TEST_A, group_id)
+        a_count = get_count(TEST_A, group_id)
+        check("開團 A", total == 1 and a_signups == 1 and a_count == 1,
+              f"total={total}, A.signups={a_signups}, A.count={a_count}")
+
+        # 8. 查帳 A
+        a_count = get_count(TEST_A, group_id)
+        check("查帳 A", a_count == 1, f"{a_count}次 {a_count*price}元 正確")
+        # 9. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 0, f"{b_count}次 {b_count*price}元 正確")
+        # 10. 名單
+        total = get_total_count(group_id)
+        b_signed = is_signed_up(TEST_B, group_id)
+        check("名單", total == 1 and not b_signed, f"1人(A) total={total} 正確")
+        # 11. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 1, "A欠1次 正確")
+
+        # 12. B +1
+        atomic_signup(TEST_B, group_id, NAME_B)
+        add_count(TEST_B, group_id, 1, NAME_B)
+        add_total_count(group_id, 1)
+        total = get_total_count(group_id)
+        b_signups = get_signup_count_for_user(TEST_B, group_id)
+        check("B +1", total == 2 and b_signups == 1,
+              f"total={total}, B.signups={b_signups}")
+
+        # 13. 查帳 A
+        a_count = get_count(TEST_A, group_id)
+        check("查帳 A", a_count == 1, f"{a_count}次 正確")
+        # 14. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 1, f"{b_count}次 {b_count*price}元 正確")
+        # 15. 名單
+        total = get_total_count(group_id)
+        check("名單", total == 2 and is_signed_up(TEST_B, group_id), f"2人(A,B) total={total} 正確")
+        # 16. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 1 and get_count(TEST_B, group_id) == 1,
+              "A欠1次 B欠1次 正確")
+
+        # 17. B +2
+        add_count(TEST_B, group_id, 2, NAME_B)
+        add_total_count(group_id, 2)
+        total = get_total_count(group_id)
+        b_signups = get_signup_count_for_user(TEST_B, group_id)
+        check("B +2", total == 4 and b_signups == 3,
+              f"total={total}, B.signups={b_signups}")
+
+        # 18. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 3, f"{b_count}次 {b_count*price}元 正確")
+        # 19. 名單
+        total = get_total_count(group_id)
+        check("名單", total == 4, f"total={total}人 正確")
+        # 20. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 1 and get_count(TEST_B, group_id) == 3,
+              "A欠1次 B欠3次 正確")
+
+        # 21. B -1
+        do_minus(TEST_B, group_id, 1)
+        total = get_total_count(group_id)
+        b_signups = get_signup_count_for_user(TEST_B, group_id)
+        check("B -1", total == 3 and b_signups == 2,
+              f"total={total}, B.signups={b_signups}")
+
+        # 22. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 2, f"{b_count}次 {b_count*price}元 正確")
+        # 23. 名單
+        total = get_total_count(group_id)
+        check("名單", total == 3, f"total={total}人 正確")
+        # 24. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 1 and get_count(TEST_B, group_id) == 2,
+              "A欠1次 B欠2次 正確")
+
+        # 25. B -2（到0）
+        do_minus(TEST_B, group_id, 2)
+        total = get_total_count(group_id)
+        b_removed = not is_signed_up(TEST_B, group_id)
+        check("B -2(到0)", total == 1 and b_removed,
+              f"total={total}, B從名單移除={b_removed}")
+
+        # 26. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 0, f"{b_count}次 {b_count*price}元 正確")
+        # 27. 名單
+        total = get_total_count(group_id)
+        check("名單", total == 1 and not is_signed_up(TEST_B, group_id),
+              f"1人(A) total={total} 正確")
+        # 28. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 1 and get_count(TEST_B, group_id) == 0,
+              "A欠1次 B無欠款 正確")
+
+        # ═══════════════════════════════════════════════════
+        # Phase 2：結束後重開第二輪
+        # ═══════════════════════════════════════════════════
+        results.append("\n【Phase 2 - 結束後重開第二輪】")
+
+        # 29. 結束活動
+        end_event_test()
+        check("結束活動", not is_event_active(group_id), "is_active=False 正確")
+        # 30. +1 被拒
+        check("+1 拒絕", not is_event_active(group_id), "活動尚未開始")
+        # 31. -1 被拒
+        check("-1 拒絕", not is_event_active(group_id), "活動尚未開始")
+        # 32. 查帳 A
+        a_count = get_count(TEST_A, group_id)
+        check("查帳 A", a_count == 1, f"保留{a_count}次 正確")
+        # 33. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 0, f"保留{b_count}次 正確")
+        # 34. 名單
+        check("名單", not is_event_active(group_id), "無活動 正確")
+        # 35. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 1 and get_count(TEST_B, group_id) == 0,
+              "A仍欠1次 B無欠款 正確")
+
+        # 36. 重新開團 A
+        coach_open_event(TEST_A, group_id, NAME_A)
+        total = get_total_count(group_id)
+        a_signups = get_signup_count_for_user(TEST_A, group_id)
+        a_count = get_count(TEST_A, group_id)
+        check("重新開團 A", total == 1 and a_signups == 1 and a_count == 2,
+              f"total={total}, A.signups={a_signups}, A.count={a_count}(累積)")
+
+        # 37. 查帳 A
+        a_count = get_count(TEST_A, group_id)
+        check("查帳 A", a_count == 2, f"{a_count}次(累積) {a_count*price}元 正確")
+        # 38. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 0, f"{b_count}次 正確")
+        # 39. 名單
+        total = get_total_count(group_id)
+        check("名單", total == 1 and not is_signed_up(TEST_B, group_id), f"1人(A) 正確")
+        # 40. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 2 and get_count(TEST_B, group_id) == 0,
+              "A欠2次 B無欠款 正確")
+
+        # 41. B 重新報名 +1
+        atomic_signup(TEST_B, group_id, NAME_B)
+        add_count(TEST_B, group_id, 1, NAME_B)
+        add_total_count(group_id, 1)
+        total = get_total_count(group_id)
+        b_signups = get_signup_count_for_user(TEST_B, group_id)
+        check("B重新報名 +1", total == 2 and b_signups == 1,
+              f"total={total}, B.signups={b_signups}")
+
+        # 42. 查帳 A
+        a_count = get_count(TEST_A, group_id)
+        check("查帳 A", a_count == 2, f"{a_count}次 正確")
+        # 43. 查帳 B
+        b_count = get_count(TEST_B, group_id)
+        check("查帳 B", b_count == 1, f"{b_count}次(新增) {b_count*price}元 正確")
+        # 44. 名單
+        total = get_total_count(group_id)
+        check("名單", total == 2 and is_signed_up(TEST_B, group_id),
+              f"2人(A,B) total={total} 正確")
+        # 45. 全部帳單
+        check("全部帳單", get_count(TEST_A, group_id) == 2 and get_count(TEST_B, group_id) == 1,
+              "A欠2次 B欠1次 正確")
+
+    finally:
+        # ── 清除測試資料 ──────────────────────────────────
+        clear_group_data(group_id)
+
+    # ── 組合報告 ──────────────────────────────────────────
+    total_tests = passed + failed
+    summary = f"✅ 全部通過 {passed}/{total_tests}" if failed == 0 else f"⚠️ 通過 {passed}/{total_tests}，失敗 {failed} 項"
+
+    msg = "🧪 測試報告\n"
+    msg += "\n".join(results)
+    msg += f"\n\n{summary}"
+    msg += "\n🧹 測試資料已清除"
+
+    line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_id = event.source.user_id
+@ -1717,6 +1964,10 @@ def handle_message(event):
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 開團設定已關閉"))
+        return
+
+    if text == "測試" and user_id == ADMIN_ID:
+        run_bot_test(group_id, reply_token, price)
+        return
+
+    if text == "查帳":
+        count = get_count(user_id, group_id)
+        if is_yearly_member(user_id, group_id):
+- 
+.53.0.windows.1
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -1207,8 +1473,11 @@ def handle_message(event):
                         cur = get_cursor()
                         if cur:
                             cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
-                            cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
                             cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, group_id))
+                            if current_count - n == 0:
+                                cur.execute("DELETE FROM signups WHERE user_id=%s AND group_id=%s", (target_user_id, group_id))
+                            else:
+                                cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, target_user_id, group_id))
                         new_count = get_total_count(group_id)
                         if new_count < 0:
                             new_count = 0
@@ -1712,6 +1981,10 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 開團設定已關閉"))
         return
 
+    if text == "測試" and user_id == ADMIN_ID:
+        run_bot_test(group_id, reply_token, price)
+        return
+
     if text == "查帳":
         count = get_count(user_id, group_id)
         if is_yearly_member(user_id, group_id):
@@ -1858,8 +2131,11 @@ def handle_message(event):
         cur = get_cursor()
         if cur:
             cur.execute("UPDATE users SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
-            cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
             cur.execute("UPDATE events SET total_count = GREATEST(total_count - %s, 0) WHERE group_id=%s", (n, group_id))
+            if current_count - n == 0:
+                cur.execute("DELETE FROM signups WHERE user_id=%s AND group_id=%s", (user_id, group_id))
+            else:
+                cur.execute("UPDATE signups SET count = GREATEST(count - %s, 0) WHERE user_id=%s AND group_id=%s", (n, user_id, group_id))
         count = get_total_count(group_id)
         if count < 0:
             count = 0
