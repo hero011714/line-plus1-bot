@@ -1346,22 +1346,7 @@ def run_bot_test(group_id, reply_token, price):
     line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
 
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    user_id = event.source.user_id
-@ -1717,6 +1964,10 @@ def handle_message(event):
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 開團設定已關閉"))
-        return
 
-    if text == "測試" and user_id == ADMIN_ID:
-        run_bot_test(group_id, reply_token, price)
-        return
-
-    if text == "查帳":
-        count = get_count(user_id, group_id)
-        if is_yearly_member(user_id, group_id):
-- 
-.53.0.windows.1
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
