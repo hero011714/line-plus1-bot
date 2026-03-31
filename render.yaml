@@ -16,4 +16,4 @@ services:
       - key: ADMIN_ID
         sync: false
       - key: DATABASE_URL
-        value: "postgresql://postgres:t%3EvTPtZt9%2FQX@aws-0-us-west-1.pooler.supabase.com:6543/postgres"
+        value: "postgresql://postgres.rtsxmbvjbfbtltcfotnt:t%3EvTPtZt9%2FQX@aws-0-us-west-1.pooler.supabase.com:6543/postgres"

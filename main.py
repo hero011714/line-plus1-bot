@@ -13,7 +13,7 @@ from linebot.exceptions import InvalidSignatureError
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN", "")
 ADMIN_ID = os.getenv("ADMIN_ID", "")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:t%3EvTPtZt9%2FQX@aws-0-us-west-1.pooler.supabase.com:6543/postgres")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres.rtsxmbvjbfbtltcfotnt:t%3EvTPtZt9%2FQX@aws-0-us-west-1.pooler.supabase.com:6543/postgres")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
