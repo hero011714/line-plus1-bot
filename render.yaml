@@ -15,3 +15,5 @@ services:
         sync: false
       - key: ADMIN_ID
         sync: false
+      - key: DATABASE_URL
+        value: "postgresql://postgres:t>vTPtZt9/QX@db.rtsxmbvjbfbtltcfotnt.supabase.co:5432/postgres"
