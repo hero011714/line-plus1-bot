@@ -39,7 +39,16 @@ def get_db():
     global conn
     if not conn or conn.closed:
         try:
-            conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+            import urllib.parse
+            parsed = urllib.parse.urlparse(DATABASE_URL)
+            conn = psycopg2.connect(
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                database=parsed.path.lstrip('/'),
+                user=parsed.username,
+                password=urllib.parse.unquote(parsed.password) if parsed.password else '',
+                sslmode='require'
+            )
             conn.autocommit = True
             print("Database connected successfully")
         except Exception as e:
