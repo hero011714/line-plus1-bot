@@ -1072,56 +1072,6 @@ async def bot_me():
     uid = get_bot_user_id()
     return {"bot_user_id": uid}
 
-@app.get("/admin/migrate")
-async def admin_migrate(secret: str = ""):
-    """Migrate data from old Render DB to Supabase. Run once."""
-    if secret != "migrate2024":
-        return {"error": "unauthorized"}
-    
-    import pg8000
-    OLD_DB = {
-        "host": "dpg-cuid6vdsvqrc73bbnnf0.oregon-postgres.render.com",
-        "database": "line_bot_db_658x",
-        "user": "admin",
-        "password": "ZgW3S5h1X2P0D9v",
-        "port": 5432,
-        "ssl_context": True
-    }
-    TABLES = ["users", "signups", "events", "config"]
-    results = {}
-    
-    try:
-        old_conn = pg8000.connect(**OLD_DB)
-        old_cur = old_conn.cursor()
-        new_cur = get_cursor()
-        if not new_cur:
-            return {"error": "new db connection failed"}
-        
-        for table in TABLES:
-            try:
-                old_cur.execute(f"SELECT * FROM {table}")
-                rows = old_cur.fetchall()
-                old_cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' ORDER BY ordinal_position")
-                columns = [col[0] for col in old_cur.fetchall()]
-                
-                get_cursor().execute(f"DELETE FROM {table}")
-                
-                if rows:
-                    placeholders = ', '.join(['%s'] * len(columns))
-                    col_names = ', '.join(columns)
-                    insert_sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
-                    for row in rows:
-                        new_cur.execute(insert_sql, row)
-                
-                results[table] = len(rows)
-            except Exception as e:
-                results[table] = f"error: {e}"
-        
-        old_conn.close()
-        return {"status": "success", "migrated": results}
-    except Exception as e:
-        return {"error": str(e)}
-
 @handler.add(JoinEvent)
 def handle_join(event):
     reply_token = event.reply_token
