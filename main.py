@@ -1502,8 +1502,16 @@ def run_open_group_test(group_id, reply_token):
         total = get_total_count(group_id)
         check("3人達上限", total == 3, f"total={total} 正確")
 
-        can_add_when_full = (total + 1) <= new_limit
-        check("年繳會員也受限", not can_add_when_full, f"無法再報名={not can_add_when_full} 正確")
+        add_yearly_member(TEST_C, group_id, NAME_C)
+        signed_up_when_full = atomic_signup(TEST_C, group_id, NAME_C)
+        check("年繳會員達上限後報名", signed_up_when_full == False, f"被拒絕={not signed_up_when_full} 正確")
+
+        c_in_signups = None
+        cur = get_cursor()
+        if cur:
+            cur.execute("SELECT user_id FROM signups WHERE user_id=%s AND group_id=%s", (TEST_C, group_id))
+            c_in_signups = cur.fetchone()
+        check("年繳會員未加入名單", c_in_signups is None, f"C不在名單={c_in_signups is None} 正確")
 
         results.append("\n【Phase D - 活動過期】")
         clear_all()
