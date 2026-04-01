@@ -1423,8 +1423,7 @@ def handle_message(event):
                             return
                         limit = get_signup_limit(group_id)
                         current_total = get_total_count(group_id)
-                        is_yearly = is_yearly_member(target_user_id, group_id)
-                        if not is_yearly and current_total + n > limit:
+                        if current_total + n > limit:
                             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
                             return
                         first_signup = not is_signed_up(target_user_id, group_id)
@@ -2080,8 +2079,7 @@ def handle_message(event):
             return
         limit = get_signup_limit(group_id)
         current_total = get_total_count(group_id)
-        is_yearly = is_yearly_member(user_id, group_id)
-        if not is_yearly and current_total + n > limit:
+        if current_total + n > limit:
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"⚠️ 人數已滿（{current_total}/{limit}），無法報名"))
             return
         
