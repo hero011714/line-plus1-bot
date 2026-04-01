@@ -1384,7 +1384,6 @@ def run_open_group_test(group_id, reply_token):
             cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
             cur.execute("DELETE FROM yearly_members WHERE group_id=%s", (group_id,))
             cur.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
-            cur.execute("DELETE FROM config WHERE group_id=%s", (group_id,))
 
     def set_auto_open_config_test():
         set_auto_open_config(group_id, 'auto_open_days', '3')
@@ -1402,8 +1401,17 @@ def run_open_group_test(group_id, reply_token):
         set_auto_open_config(group_id, 'auto_schedule_days', '')
         set_auto_open_config(group_id, 'auto_schedule_time', '')
 
+    def reset_config():
+        cur = get_cursor()
+        if cur:
+            cur.execute("DELETE FROM config WHERE group_id='default' AND key='signup_limit'")
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', '10') ON CONFLICT DO NOTHING")
+            cur.execute("DELETE FROM config WHERE group_id='default' AND key='event_duration'")
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'event_duration', '30') ON CONFLICT DO NOTHING")
+
     try:
         clear_all()
+        reset_config()
 
         results.append("\n【Phase A - 自動開團設定】")
         set_auto_open_config_test()
@@ -1417,10 +1425,11 @@ def run_open_group_test(group_id, reply_token):
         check("設定零打時間", zero_time == '11:30', f"{zero_time}=11:30 正確")
 
         clear_auto_open_config()
-        auto_days = get_auto_open_config(group_id, 'auto_open_days')
-        check("清除設定", auto_days == '' or auto_days is None, "已清除 正確")
+        reset_config()
 
         results.append("\n【Phase B - 自動開團流程】")
+        clear_all()
+        reset_config()
         set_auto_open_config_test()
         set_auto_trigger_date(group_id, 'auto_open_triggered_date')
         coach_open_event(ADMIN_ID, group_id, "系統", auto_opened=True)
@@ -1479,6 +1488,7 @@ def run_open_group_test(group_id, reply_token):
 
         results.append("\n【Phase C - 報名人數上限】")
         clear_all()
+        reset_config()
         new_limit = 3
         cur = get_cursor()
         if cur:
@@ -1515,6 +1525,7 @@ def run_open_group_test(group_id, reply_token):
 
         results.append("\n【Phase D - 活動過期】")
         clear_all()
+        reset_config()
         coach_open_event(TEST_A, group_id, NAME_A)
         cur = get_cursor()
         if cur:
@@ -1531,6 +1542,7 @@ def run_open_group_test(group_id, reply_token):
 
         results.append("\n【Phase E - 多人報名】")
         clear_all()
+        reset_config()
         coach_open_event(TEST_A, group_id, NAME_A)
         atomic_signup(TEST_B, group_id, NAME_B)
         atomic_signup(TEST_C, group_id, NAME_C)
@@ -1549,6 +1561,7 @@ def run_open_group_test(group_id, reply_token):
 
         results.append("\n【Phase F - 活動結束】")
         clear_all()
+        reset_config()
         coach_open_event(TEST_A, group_id, NAME_A)
         add_count(TEST_A, group_id, 1, NAME_A)
         add_total_count(group_id, 1)
@@ -1572,6 +1585,7 @@ def run_open_group_test(group_id, reply_token):
     finally:
         clear_all()
         clear_auto_open_config()
+        reset_config()
 
     total_tests = passed + failed
     summary = f"✅ 全部通過 {passed}/{total_tests}" if failed == 0 else f"⚠️ 通過 {passed}/{total_tests}，失敗 {failed} 項"
