@@ -1356,6 +1356,227 @@ def run_bot_test(group_id, reply_token, price):
 
 
 
+def run_open_group_test(group_id, reply_token):
+    TEST_A = "TEST_USER_A"
+    TEST_B = "TEST_USER_B"
+    TEST_C = "TEST_USER_C"
+    NAME_A = "測試A"
+    NAME_B = "測試B"
+    NAME_C = "測試C"
+
+    results = []
+    passed = 0
+    failed = 0
+
+    def check(name, condition, detail=""):
+        nonlocal passed, failed
+        if condition:
+            results.append(f"✅ {name}" + (f"：{detail}" if detail else ""))
+            passed += 1
+        else:
+            results.append(f"❌ {name}" + (f"：{detail}" if detail else ""))
+            failed += 1
+
+    def clear_all():
+        cur = get_cursor()
+        if cur:
+            cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM yearly_members WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM config WHERE group_id=%s", (group_id,))
+
+    def set_auto_open_config_test():
+        set_auto_open_config(group_id, 'auto_open_days', '3')
+        set_auto_open_config(group_id, 'auto_open_time', '20:00')
+        set_auto_open_config(group_id, 'zero_play_open_days', '4')
+        set_auto_open_config(group_id, 'zero_play_open_time', '11:30')
+        set_auto_open_config(group_id, 'auto_schedule_days', '4')
+        set_auto_open_config(group_id, 'auto_schedule_time', '23:00')
+
+    def clear_auto_open_config():
+        set_auto_open_config(group_id, 'auto_open_days', '')
+        set_auto_open_config(group_id, 'auto_open_time', '')
+        set_auto_open_config(group_id, 'zero_play_open_days', '')
+        set_auto_open_config(group_id, 'zero_play_open_time', '')
+        set_auto_open_config(group_id, 'auto_schedule_days', '')
+        set_auto_open_config(group_id, 'auto_schedule_time', '')
+
+    try:
+        clear_all()
+
+        results.append("\n【Phase A - 自動開團設定】")
+        set_auto_open_config_test()
+        auto_days = get_auto_open_config(group_id, 'auto_open_days')
+        auto_time = get_auto_open_config(group_id, 'auto_open_time')
+        zero_days = get_zero_play_open_config(group_id, 'zero_play_open_days')
+        zero_time = get_zero_play_open_config(group_id, 'zero_play_open_time')
+        check("設定自動開團日", auto_days == '3', f"{auto_days}=3 正確")
+        check("設定自動開團時間", auto_time == '20:00', f"{auto_time}=20:00 正確")
+        check("設定零打日", zero_days == '4', f"{zero_days}=4 正確")
+        check("設定零打時間", zero_time == '11:30', f"{zero_time}=11:30 正確")
+
+        clear_auto_open_config()
+        auto_days = get_auto_open_config(group_id, 'auto_open_days')
+        check("清除設定", auto_days == '' or auto_days is None, "已清除 正確")
+
+        results.append("\n【Phase B - 自動開團流程】")
+        set_auto_open_config_test()
+        set_auto_trigger_date(group_id, 'auto_open_triggered_date')
+        coach_open_event(ADMIN_ID, group_id, "系統", auto_opened=True)
+        is_auto = is_event_auto_opened(group_id)
+        check("自動開團", is_auto, f"auto_opened={is_auto} 正確")
+
+        add_yearly_member(TEST_A, group_id, NAME_A)
+        is_yearly_a = is_yearly_member(TEST_A, group_id)
+        check("年繳會員設定", is_yearly_a, f"is_yearly={is_yearly_a} 正確")
+
+        cur = get_cursor()
+        if cur:
+            cur.execute("""
+                INSERT INTO signups (user_id, group_id, name, count, signup_time)
+                VALUES (%s, %s, %s, 0, %s)
+            """, (TEST_A, group_id, NAME_A, int(time.time())))
+            cur.execute("""
+                UPDATE users SET count = 0 WHERE user_id=%s AND group_id=%s
+            """, (TEST_A, group_id))
+
+        should_allow_yearly = should_allow_signup(TEST_A, group_id)
+        check("年繳會員應可報名", should_allow_yearly == True, f"{should_allow_yearly} 正確")
+
+        add_count(TEST_A, group_id, 1, NAME_A)
+        add_total_count(group_id, 1)
+        count_a = get_count(TEST_A, group_id)
+        total = get_total_count(group_id)
+        check("年繳會員+1", count_a == 0 and total == 1, f"count_a={count_a}, total={total} 正確")
+
+        should_allow_non_yearly = should_allow_signup(TEST_B, group_id)
+        check("非年繳會員應被拒", should_allow_non_yearly == False, f"{should_allow_non_yearly} 正確")
+
+        b_before = None
+        cur = get_cursor()
+        if cur:
+            cur.execute("SELECT user_id FROM signups WHERE user_id=%s AND group_id=%s", (TEST_B, group_id))
+            b_before = cur.fetchone()
+        check("非年繳+1被拒", b_before is None, f"B未報名={b_before is None} 正確")
+
+        set_zero_play_open_triggered(group_id, True)
+        zero_triggered = get_zero_play_open_triggered(group_id)
+        check("零打觸發", zero_triggered, f"zero_triggered={zero_triggered} 正確")
+
+        should_allow_after_zero = should_allow_signup(TEST_B, group_id)
+        check("零打後應開放", should_allow_after_zero == True, f"{should_allow_after_zero} 正確")
+
+        atomic_signup(TEST_B, group_id, NAME_B)
+        add_count(TEST_B, group_id, 1, NAME_B)
+        add_total_count(group_id, 1)
+        count_b = get_count(TEST_B, group_id)
+        total = get_total_count(group_id)
+        check("非年繳零打後+1", count_b == 1 and total == 2, f"count_b={count_b}, total={total} 正確")
+
+        should_allow_yearly_after_zero = should_allow_signup(TEST_A, group_id)
+        check("年繳零打後仍可報名", should_allow_yearly_after_zero == True, f"{should_allow_yearly_after_zero} 正確")
+
+        results.append("\n【Phase C - 報名人數上限】")
+        clear_all()
+        new_limit = 3
+        cur = get_cursor()
+        if cur:
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (str(new_limit), str(new_limit)))
+        limit = get_signup_limit(group_id)
+        check("設定報名上限", limit == new_limit, f"limit={limit} 正確")
+
+        coach_open_event(TEST_A, group_id, NAME_A)
+        add_count(TEST_A, group_id, 1, NAME_A)
+        add_total_count(group_id, 1)
+        add_yearly_member(TEST_B, group_id, NAME_B)
+        atomic_signup(TEST_B, group_id, NAME_B)
+        add_count(TEST_B, group_id, 1, NAME_B)
+        add_total_count(group_id, 1)
+        total = get_total_count(group_id)
+        check("2人報名", total == 2, f"total={total} 正確")
+
+        atomic_signup(TEST_C, group_id, NAME_C)
+        add_count(TEST_C, group_id, 1, NAME_C)
+        add_total_count(group_id, 1)
+        total = get_total_count(group_id)
+        check("3人達上限", total == 3, f"total={total} 正確")
+
+        can_add_when_full = (total + 1) <= new_limit
+        check("年繳會員也受限", not can_add_when_full, f"無法再報名={not can_add_when_full} 正確")
+
+        results.append("\n【Phase D - 活動過期】")
+        clear_all()
+        coach_open_event(TEST_A, group_id, NAME_A)
+        cur = get_cursor()
+        if cur:
+            cur.execute("UPDATE events SET expires_at = 0 WHERE group_id=%s", (group_id,))
+        is_active = is_event_active(group_id)
+        check("活動過期", not is_active, f"is_active={is_active} 正確")
+
+        b_can_signup = False
+        cur = get_cursor()
+        if cur:
+            cur.execute("SELECT user_id FROM signups WHERE user_id=%s AND group_id=%s", (TEST_B, group_id))
+            b_can_signup = cur.fetchone() is not None
+        check("過期後+1失敗", not b_can_signup, f"B無法報名={not b_can_signup} 正確")
+
+        results.append("\n【Phase E - 多人報名】")
+        clear_all()
+        coach_open_event(TEST_A, group_id, NAME_A)
+        atomic_signup(TEST_B, group_id, NAME_B)
+        atomic_signup(TEST_C, group_id, NAME_C)
+        add_count(TEST_A, group_id, 2, NAME_A)
+        add_total_count(group_id, 2)
+        add_count(TEST_B, group_id, 3, NAME_B)
+        add_total_count(group_id, 3)
+        add_count(TEST_C, group_id, 1, NAME_C)
+        add_total_count(group_id, 1)
+        count_a = get_count(TEST_A, group_id)
+        count_b = get_count(TEST_B, group_id)
+        count_c = get_count(TEST_C, group_id)
+        total = get_total_count(group_id)
+        check("多人報名統計", count_a == 2 and count_b == 3 and count_c == 1 and total == 6,
+              f"A={count_a}, B={count_b}, C={count_c}, total={total} 正確")
+
+        results.append("\n【Phase F - 活動結束】")
+        clear_all()
+        coach_open_event(TEST_A, group_id, NAME_A)
+        add_count(TEST_A, group_id, 1, NAME_A)
+        add_total_count(group_id, 1)
+        count_before = get_count(TEST_A, group_id)
+        is_active_before = is_event_active(group_id)
+        check("結束前有活動", is_active_before and count_before == 1, f"active={is_active_before}, count={count_before}")
+
+        cur = get_cursor()
+        if cur:
+            cur.execute("DELETE FROM signups WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
+        is_active_after = is_event_active(group_id)
+        count_after = get_count(TEST_A, group_id)
+        check("活動結束", not is_active_after, f"active={is_active_after} 正確")
+        check("帳單保留", count_after == 1, f"count={count_after} 正確")
+
+        coach_open_event(TEST_A, group_id, NAME_A)
+        count_accumulated = get_count(TEST_A, group_id)
+        check("重新開團累加", count_accumulated == 2, f"count={count_accumulated} 正確")
+
+    finally:
+        clear_all()
+        clear_auto_open_config()
+
+    total_tests = passed + failed
+    summary = f"✅ 全部通過 {passed}/{total_tests}" if failed == 0 else f"⚠️ 通過 {passed}/{total_tests}，失敗 {failed} 項"
+
+    msg = "🧪 開團功能測試報告\n"
+    msg += "\n".join(results)
+    msg += f"\n\n{summary}"
+    msg += "\n🧹 測試資料已清除"
+
+    line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
+
+
+
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -1537,6 +1758,7 @@ def handle_message(event):
             msg += "退出群組：清除資料並退出\n"
             msg += "狀態：查看系統狀態\n"
             msg += "測試：執行自動化測試\n"
+            msg += "開團功能測試：執行開團功能測試\n"
             msg += "\n【開團設定】\n"
             msg += "開團設定查看：查看目前設定\n"
             msg += "開團設定 [開團日] [開團時間] [零打日] [零打時間] [排程日] [排程時間]\n"
@@ -1977,6 +2199,10 @@ def handle_message(event):
 
     if text == "測試" and user_id == ADMIN_ID:
         run_bot_test(group_id, reply_token, price)
+        return
+
+    if text == "開團功能測試" and user_id == ADMIN_ID:
+        run_open_group_test(group_id, reply_token)
         return
 
     if text == "查帳":
