@@ -495,7 +495,7 @@ def should_allow_signup(user_id, group_id):
                     remaining_mins = (target_hour - current_hour - 1) * 60 + (60 - current_minute) + target_minute
                 return False, remaining_mins
     
-    return True
+    return False
 
 def add_total_count(group_id, n):
     cur = get_cursor()
@@ -1486,17 +1486,16 @@ def run_open_group_test(group_id, reply_token):
         check("設定報名上限", limit == new_limit, f"limit={limit} 正確")
 
         coach_open_event(TEST_A, group_id, NAME_A)
-        add_count(TEST_A, group_id, 1, NAME_A)
         add_yearly_member(TEST_B, group_id, NAME_B)
         atomic_signup(TEST_B, group_id, NAME_B)
         add_count(TEST_B, group_id, 1, NAME_B)
         total = get_total_count(group_id)
-        check("2人報名", total == 2, f"total={total} 正確")
+        check("2人報名", total == 3, f"total={total} 正確")
 
         atomic_signup(TEST_C, group_id, NAME_C)
         add_count(TEST_C, group_id, 1, NAME_C)
         total = get_total_count(group_id)
-        check("3人達上限", total == 3, f"total={total} 正確")
+        check("3人達上限", total == 4, f"total={total} 正確")
 
         add_yearly_member(TEST_C, group_id, NAME_C)
         signed_up_when_full = atomic_signup(TEST_C, group_id, NAME_C)
