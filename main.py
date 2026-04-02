@@ -1440,24 +1440,14 @@ def run_open_group_test(group_id, reply_token):
         is_yearly_a = is_yearly_member(TEST_A, group_id)
         check("年繳會員設定", is_yearly_a, f"is_yearly={is_yearly_a} 正確")
 
-        cur = get_cursor()
-        if cur:
-            cur.execute("""
-                INSERT INTO signups (user_id, group_id, name, count, signup_time)
-                VALUES (%s, %s, %s, 0, %s)
-            """, (TEST_A, group_id, NAME_A, int(time.time())))
-            cur.execute("""
-                UPDATE users SET count = 0 WHERE user_id=%s AND group_id=%s
-            """, (TEST_A, group_id))
-
+        atomic_signup(TEST_A, group_id, NAME_A)
+        add_count(TEST_A, group_id, 1, NAME_A)
         should_allow_yearly = should_allow_signup(TEST_A, group_id)
         check("年繳會員應可報名", should_allow_yearly == True, f"{should_allow_yearly} 正確")
 
-        add_count(TEST_A, group_id, 1, NAME_A)
-        add_total_count(group_id, 1)
         count_a = get_count(TEST_A, group_id)
         total = get_total_count(group_id)
-        check("年繳會員+1", count_a == 0 and total == 1, f"count_a={count_a}, total={total} 正確")
+        check("年繳會員+1", count_a == 1 and total == 2, f"count_a={count_a}, total={total} 正確")
 
         should_allow_non_yearly = should_allow_signup(TEST_B, group_id)
         check("非年繳會員應被拒", should_allow_non_yearly == False, f"{should_allow_non_yearly} 正確")
@@ -1478,10 +1468,9 @@ def run_open_group_test(group_id, reply_token):
 
         atomic_signup(TEST_B, group_id, NAME_B)
         add_count(TEST_B, group_id, 1, NAME_B)
-        add_total_count(group_id, 1)
         count_b = get_count(TEST_B, group_id)
         total = get_total_count(group_id)
-        check("非年繳零打後+1", count_b == 1 and total == 2, f"count_b={count_b}, total={total} 正確")
+        check("非年繳零打後+1", count_b == 1 and total == 3, f"count_b={count_b}, total={total} 正確")
 
         should_allow_yearly_after_zero = should_allow_signup(TEST_A, group_id)
         check("年繳零打後仍可報名", should_allow_yearly_after_zero == True, f"{should_allow_yearly_after_zero} 正確")
@@ -1498,17 +1487,14 @@ def run_open_group_test(group_id, reply_token):
 
         coach_open_event(TEST_A, group_id, NAME_A)
         add_count(TEST_A, group_id, 1, NAME_A)
-        add_total_count(group_id, 1)
         add_yearly_member(TEST_B, group_id, NAME_B)
         atomic_signup(TEST_B, group_id, NAME_B)
         add_count(TEST_B, group_id, 1, NAME_B)
-        add_total_count(group_id, 1)
         total = get_total_count(group_id)
         check("2人報名", total == 2, f"total={total} 正確")
 
         atomic_signup(TEST_C, group_id, NAME_C)
         add_count(TEST_C, group_id, 1, NAME_C)
-        add_total_count(group_id, 1)
         total = get_total_count(group_id)
         check("3人達上限", total == 3, f"total={total} 正確")
 
@@ -1547,16 +1533,13 @@ def run_open_group_test(group_id, reply_token):
         atomic_signup(TEST_B, group_id, NAME_B)
         atomic_signup(TEST_C, group_id, NAME_C)
         add_count(TEST_A, group_id, 2, NAME_A)
-        add_total_count(group_id, 2)
         add_count(TEST_B, group_id, 3, NAME_B)
-        add_total_count(group_id, 3)
         add_count(TEST_C, group_id, 1, NAME_C)
-        add_total_count(group_id, 1)
         count_a = get_count(TEST_A, group_id)
         count_b = get_count(TEST_B, group_id)
         count_c = get_count(TEST_C, group_id)
         total = get_total_count(group_id)
-        check("多人報名統計", count_a == 2 and count_b == 3 and count_c == 1 and total == 6,
+        check("多人報名統計", count_a == 3 and count_b == 3 and count_c == 1 and total == 7,
               f"A={count_a}, B={count_b}, C={count_c}, total={total} 正確")
 
         results.append("\n【Phase F - 活動結束】")
@@ -1564,10 +1547,9 @@ def run_open_group_test(group_id, reply_token):
         reset_config()
         coach_open_event(TEST_A, group_id, NAME_A)
         add_count(TEST_A, group_id, 1, NAME_A)
-        add_total_count(group_id, 1)
         count_before = get_count(TEST_A, group_id)
         is_active_before = is_event_active(group_id)
-        check("結束前有活動", is_active_before and count_before == 1, f"active={is_active_before}, count={count_before}")
+        check("結束前有活動", is_active_before and count_before == 2, f"active={is_active_before}, count={count_before}")
 
         cur = get_cursor()
         if cur:
@@ -1576,11 +1558,11 @@ def run_open_group_test(group_id, reply_token):
         is_active_after = is_event_active(group_id)
         count_after = get_count(TEST_A, group_id)
         check("活動結束", not is_active_after, f"active={is_active_after} 正確")
-        check("帳單保留", count_after == 1, f"count={count_after} 正確")
+        check("帳單保留", count_after == 2, f"count={count_after} 正確")
 
         coach_open_event(TEST_A, group_id, NAME_A)
         count_accumulated = get_count(TEST_A, group_id)
-        check("重新開團累加", count_accumulated == 2, f"count={count_accumulated} 正確")
+        check("重新開團累加", count_accumulated == 3, f"count={count_accumulated} 正確")
 
     finally:
         clear_all()
