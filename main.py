@@ -1081,6 +1081,26 @@ async def bot_me():
     uid = get_bot_user_id()
     return {"bot_user_id": uid}
 
+@app.get("/export")
+async def export_db():
+    cur = get_cursor()
+    if not cur:
+        return {"error": "Database connection failed"}
+    
+    data = {}
+    tables = ["users", "config", "yearly_members", "events", "signups"]
+    
+    for table in tables:
+        try:
+            cur.execute(f"SELECT * FROM {table}")
+            rows = cur.fetchall()
+            colnames = [desc[0] for desc in cur.description]
+            data[table] = [dict(zip(colnames, row)) for row in rows]
+        except Exception as e:
+            data[table] = {"error": str(e)}
+            
+    return data
+
 @handler.add(JoinEvent)
 def handle_join(event):
     reply_token = event.reply_token
