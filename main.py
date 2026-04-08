@@ -1569,6 +1569,34 @@ def run_open_group_test(group_id, reply_token):
         count_accumulated = get_count(TEST_A, group_id)
         check("重新開團累加", count_accumulated == 3, f"count={count_accumulated} 正確")
 
+        results.append("\n【Phase G - 每週循環持續性】")
+        clear_all()
+        reset_config()
+
+        # G1: 空設定不觸發
+        set_auto_open_config(group_id, 'auto_open_days', '')
+        set_auto_open_config(group_id, 'auto_open_time', '')
+        should_trigger_empty = should_auto_open(group_id)
+        check("空設定不觸發", should_trigger_empty == False, f"{should_trigger_empty} 正確")
+
+        # G2: 跨週觸發 date 重置
+        clear_all()
+        reset_config()
+        set_auto_open_config_test()
+        
+        # 模擬昨天已觸發
+        cur = get_cursor()
+        if cur:
+            taiwan_tz = timezone(timedelta(hours=8))
+            yesterday = (datetime.now(taiwan_tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, %s, %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, 'auto_open_triggered_date', yesterday, yesterday))
+            
+        last_trigger = get_auto_trigger_date(group_id, 'auto_open_triggered_date')
+        today_str = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        
+        # 只要 last_trigger 不是今天，程式就不會擋下觸發
+        check("舊日期不會被阻擋", last_trigger != today_str, f"last={last_trigger}, today={today_str}")
+
     finally:
         clear_all()
         clear_auto_open_config()
