@@ -56,10 +56,16 @@ def get_db():
             return None
     else:
         try:
-            conn.reset()
-            conn.autocommit = True
-        except:
-            pass
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+        except Exception:
+            try:
+                conn.close()
+            except:
+                pass
+            conn = None
+            return get_db()
     return conn
 
 def get_cursor():
