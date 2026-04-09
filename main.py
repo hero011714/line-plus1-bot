@@ -388,6 +388,10 @@ def get_signup_limit(group_id):
     if not cur:
         return 12
     try:
+        cur.execute("SELECT value FROM config WHERE group_id=%s AND key='signup_limit'", (group_id,))
+        result = cur.fetchone()
+        if result:
+            return int(result[0])
         cur.execute("SELECT value FROM config WHERE group_id='default' AND key='signup_limit'")
         result = cur.fetchone()
         return int(result[0]) if result else 12
@@ -1870,7 +1874,7 @@ def handle_message(event):
             new_limit = int(text.split()[-1])
             cur = get_cursor()
             if cur:
-                cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (str(new_limit), str(new_limit)))
+                cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(new_limit), str(new_limit)))
             line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 報名人數上限已設定為 {new_limit} 人"))
         except:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：設定報名人數上限 數字"))
@@ -2159,7 +2163,7 @@ def handle_message(event):
         
         parts_list = parts.split()
         if len(parts_list) < 6:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00\n（開團日 開團時間 零打日 零打時間 排程日 排程時間）"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限）"))
             return
         
         try:
@@ -2169,6 +2173,12 @@ def handle_message(event):
             zero_time = parts_list[3]
             schedule_days = parts_list[4]
             schedule_time = parts_list[5]
+            
+            signup_limit = None
+            if len(parts_list) >= 7:
+                signup_limit = int(parts_list[6])
+                if signup_limit < 1 or signup_limit > 100:
+                    raise ValueError("signup_limit out of range")
             
             open_days_list = [int(d.strip()) for d in open_days.split(',') if d.strip().isdigit()]
             if not open_days_list or any(d < 1 or d > 7 for d in open_days_list):
@@ -2214,14 +2224,20 @@ def handle_message(event):
             set_schedule_config(group_id, 'schedule_days', schedule_days)
             set_schedule_config(group_id, 'schedule_time', schedule_time)
             
+            if signup_limit is not None:
+                cur = get_cursor()
+                if cur:
+                    cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(signup_limit), str(signup_limit)))
+            
             day_names = {1: "週一", 2: "週二", 3: "週三", 4: "週四", 5: "週五", 6: "週六", 7: "週日"}
             open_display = ", ".join([day_names.get(d, str(d)) for d in open_days_list])
             zero_display = ", ".join([day_names.get(d, str(d)) for d in zero_days_list])
             schedule_display = ", ".join([day_names.get(d, str(d)) for d in schedule_days_list])
             
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 開團設定已設定：\n  自動開團：{open_display} {open_time}\n  零打開放：{zero_display} {zero_time}\n  自動排程：{schedule_display} {schedule_time}\n\n※ 自動開團後僅年繳會員可報名\n※ 零打開放後所有人都可報名\n※ 自動排程結束活動並發送名單"))
+            limit_msg = f"\n  報名人數上限：{signup_limit} 人" if signup_limit else ""
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 開團設定已設定：\n  自動開團：{open_display} {open_time}\n  零打開放：{zero_display} {zero_time}\n  自動排程：{schedule_display} {schedule_time}{limit_msg}\n\n※ 自動開團後僅年繳會員可報名\n※ 零打開放後所有人都可報名\n※ 自動排程結束活動並發送名單"))
         except:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限）"))
         return
 
     if text == "開團設定關閉" and user_id == ADMIN_ID:
