@@ -1060,7 +1060,8 @@ def check_and_trigger_zero_play():
             print(f"[ZERO_PLAY] Error for {group_id[:8]}...: {e}")
 
 @app.head("/")
-async def health_check_head():
+async def health_check_head(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_all_auto_tasks)
     return "OK"
 
 def run_all_auto_tasks():
