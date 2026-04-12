@@ -1398,6 +1398,7 @@ def run_open_group_test(group_id, reply_token):
             cur.execute("DELETE FROM events WHERE group_id=%s", (group_id,))
             cur.execute("DELETE FROM yearly_members WHERE group_id=%s", (group_id,))
             cur.execute("DELETE FROM users WHERE group_id=%s", (group_id,))
+            cur.execute("DELETE FROM config WHERE group_id=%s AND key='zero_play_open_triggered'", (group_id,))
 
     def set_auto_open_config_test():
         set_auto_open_config(group_id, 'auto_open_days', '3')
@@ -1495,7 +1496,8 @@ def run_open_group_test(group_id, reply_token):
         new_limit = 3
         cur = get_cursor()
         if cur:
-            cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (str(new_limit), str(new_limit)))
+            cur.execute("DELETE FROM config WHERE group_id=%s AND key='signup_limit'", (group_id,))
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(new_limit), str(new_limit)))
         limit = get_signup_limit(group_id)
         check("設定報名上限", limit == new_limit, f"limit={limit} 正確")
 
