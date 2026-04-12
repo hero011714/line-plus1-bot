@@ -141,7 +141,7 @@ def init_tables():
         """)
         if not cur.fetchone():
             cur.execute("ALTER TABLE signups ADD COLUMN count INTEGER DEFAULT 1")
-        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '50') ON CONFLICT DO NOTHING")
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'price', '60') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'max_per_action', '10') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'fetch_interval', '86400') ON CONFLICT DO NOTHING")
         cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', '10') ON CONFLICT DO NOTHING")
@@ -178,16 +178,16 @@ def clear_group_data(group_id):
 def get_price(group_id):
     cur = get_cursor()
     if not cur:
-        return 50
+        return 60
     try:
         cur.execute("SELECT value FROM config WHERE group_id=%s AND key='price'", (group_id,))
         result = cur.fetchone()
         if result:
             return int(result[0])
-        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', '50')", (group_id,))
-        return 50
+        cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', '60')", (group_id,))
+        return 60
     except:
-        return 50
+        return 60
 
 def get_max_per_action():
     cur = get_cursor()
@@ -1610,6 +1610,28 @@ def run_open_group_test(group_id, reply_token):
         # 只要 last_trigger 不是今天，程式就不會擋下觸發
         check("舊日期不會被阻擋", last_trigger != today_str, f"last={last_trigger}, today={today_str}")
 
+        results.append("\n【Phase H - 單價設定】")
+        clear_all()
+        reset_config()
+
+        # H1: 設定新價格
+        test_price = 70
+        cur = get_cursor()
+        if cur:
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(test_price), str(test_price)))
+        price_after_set = get_price(group_id)
+        check("設定單價", price_after_set == test_price, f"price={price_after_set} 正確")
+
+        # H2: 不設定，保持原價格
+        price_keep = get_price(group_id)
+        check("不設保持", price_keep == test_price, f"price={price_keep} 正確")
+
+        # H3: 清除後，驗證新預設值 60
+        clear_all()
+        reset_config()
+        price_default = get_price(group_id)
+        check("新群組預設", price_default == 60, f"price={price_default} 正確")
+
     finally:
         clear_all()
         clear_auto_open_config()
@@ -1811,11 +1833,13 @@ def handle_message(event):
             msg += "開團功能測試：執行開團功能測試\n"
             msg += "\n【開團設定】\n"
             msg += "開團設定查看：查看目前設定\n"
-            msg += "開團設定 [開團日] [開團時間] [零打日] [零打時間] [排程日] [排程時間]\n"
-            msg += "  例：開團設定 3 20:00 4 11:30 4 23:00\n"
+            msg += "開團設定 [開團日] [開團時間] [零打日] [零打時間] [排程日] [排程時間] [人數上限] [單價]\n"
+            msg += "  例：開團設定 3 20:00 4 20:05 5 18:00 10 60\n"
             msg += "  開團日=3(週三) 開團時間=20:00\n"
-            msg += "  零打日=4(週四) 零打時間=11:30\n"
-            msg += "  排程日=4(週四) 排程時間=23:00\n"
+            msg += "  零打日=4(週四) 零打時間=20:05\n"
+            msg += "  排程日=5(週五) 排程時間=18:00\n"
+            msg += "  人數上限：10人 可選\n"
+            msg += "  單價：60元（新群組預設）可選\n"
             msg += "開團設定關閉：關閉所有設定"
         line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
         return
@@ -2171,7 +2195,7 @@ def handle_message(event):
         
         parts_list = parts.split()
         if len(parts_list) < 6:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限）"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12] [60]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限 可選：單價）"))
             return
         
         try:
@@ -2187,6 +2211,12 @@ def handle_message(event):
                 signup_limit = int(parts_list[6])
                 if signup_limit < 1 or signup_limit > 100:
                     raise ValueError("signup_limit out of range")
+            
+            price = None
+            if len(parts_list) >= 8:
+                price = int(parts_list[7])
+                if price < 30 or price > 200:
+                    raise ValueError("price out of range")
             
             open_days_list = [int(d.strip()) for d in open_days.split(',') if d.strip().isdigit()]
             if not open_days_list or any(d < 1 or d > 7 for d in open_days_list):
@@ -2232,10 +2262,12 @@ def handle_message(event):
             set_schedule_config(group_id, 'schedule_days', schedule_days)
             set_schedule_config(group_id, 'schedule_time', schedule_time)
             
-            if signup_limit is not None:
-                cur = get_cursor()
-                if cur:
+            cur = get_cursor()
+            if cur:
+                if signup_limit is not None:
                     cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(signup_limit), str(signup_limit)))
+                if price is not None:
+                    cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(price), str(price)))
             
             day_names = {1: "週一", 2: "週二", 3: "週三", 4: "週四", 5: "週五", 6: "週六", 7: "週日"}
             open_display = ", ".join([day_names.get(d, str(d)) for d in open_days_list])
@@ -2243,9 +2275,15 @@ def handle_message(event):
             schedule_display = ", ".join([day_names.get(d, str(d)) for d in schedule_days_list])
             
             limit_msg = f"\n  報名人數上限：{signup_limit} 人" if signup_limit else ""
-            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 開團設定已設定：\n  自動開團：{open_display} {open_time}\n  零打開放：{zero_display} {zero_time}\n  自動排程：{schedule_display} {schedule_time}{limit_msg}\n\n※ 自動開團後僅年繳會員可報名\n※ 零打開放後所有人都可報名\n※ 自動排程結束活動並發送名單"))
+            price_msg = f"\n  單價：{price} 元" if price else ""
+            line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 開團設定已設定：\n  自動開團：{open_display} {open_time}\n  零打開放：{zero_display} {zero_time}\n  自動排程：{schedule_display} {schedule_time}{limit_msg}{price_msg}\n\n※ 自動開團後僅年繳會員可報名\n※ 零打開放後所有人都可報名\n※ 自動排程結束活動並發送名單"))
+        except ValueError as e:
+            if "signup_limit out of range" in str(e) or "price out of range" in str(e):
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 數值超出範圍：人數上限 1-100 人，單價 30-200 元"))
+            else:
+                line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12] [60]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限 可選：單價）"))
         except:
-            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限）"))
+            line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12] [60]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限 可選：單價）"))
         return
 
     if text == "開團設定關閉" and user_id == ADMIN_ID:
