@@ -1525,7 +1525,7 @@ def run_open_group_test(group_id, reply_token):
         if cur:
             cur.execute("SELECT user_id FROM signups WHERE user_id=%s AND group_id=%s", (TEST_C, group_id))
             c_in_signups = cur.fetchone()
-        check("年繳會員未加入名單", c_in_signups is None, f"C不在名單={c_in_signups is None} 正確")
+        check("年繳會員已在名單", c_in_signups is not None, f"C已在名單={c_in_signups is not None} 正確")
 
         results.append("\n【Phase D - 活動過期】")
         clear_all()
