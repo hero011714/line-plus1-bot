@@ -896,8 +896,11 @@ def atomic_signup(user_id, group_id, name=""):
             limit_check AS (
                 SELECT COALESCE((
                     SELECT value::int FROM config
+                    WHERE group_id=%s AND key='signup_limit'
+                ), COALESCE((
+                    SELECT value::int FROM config
                     WHERE group_id='default' AND key='signup_limit'
-                ), 10) AS lim
+                ), 10)) AS lim
             ),
             count_check AS (
                 SELECT COALESCE(SUM(count), 0)::int AS cnt FROM signups WHERE group_id=%s
@@ -915,7 +918,7 @@ def atomic_signup(user_id, group_id, name=""):
                     WHEN (SELECT cnt FROM decision) >= (SELECT lim FROM decision) THEN 'full'
                     ELSE 'ok'
                 END AS result
-        """, (group_id, group_id, now))
+        """, (group_id, group_id, group_id, now))
         result = cur.fetchone()
         if not result or result[0] != 'ok':
             return False
