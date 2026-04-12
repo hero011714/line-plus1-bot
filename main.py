@@ -1128,8 +1128,10 @@ async def callback(request: Request):
 def run_bot_test(group_id, reply_token, price):
     TEST_A = "TEST_USER_A"
     TEST_B = "TEST_USER_B"
+    TEST_C = "TEST_USER_C"
     NAME_A = "測試A"
     NAME_B = "測試B"
+    NAME_C = "測試C"
 
     results = []
     passed = 0
@@ -1352,13 +1354,137 @@ def run_bot_test(group_id, reply_token, price):
         total = get_total_count(group_id)
         check("名單", total == 2 and is_signed_up(TEST_B, group_id),
               f"2人(A,B) total={total} 正確")
-        # 45. 全部帳單
+# 45. 全部帳單
         check("全部帳單", get_count(TEST_A, group_id) == 2 and get_count(TEST_B, group_id) == 1,
               "A欠2次 B欠1次 正確")
+
+        # ═══════════════════════════════════════════════════
+        # Phase 3：開團設定功能（合併自開團功能測試）
+        # ═══════════════════════════════════════════════════
+        results.append("\n【Phase 3 - 開團設定】")
+
+        # 初始化開團設定測試必要函數
+        def set_auto_open_config_test():
+            set_auto_open_config(group_id, 'auto_open_days', '3')
+            set_auto_open_config(group_id, 'auto_open_time', '20:00')
+            set_auto_open_config(group_id, 'zero_play_open_days', '4')
+            set_auto_open_config(group_id, 'zero_play_open_time', '11:30')
+            set_auto_open_config(group_id, 'auto_schedule_days', '4')
+            set_auto_open_config(group_id, 'auto_schedule_time', '23:00')
+
+        def clear_auto_open_config():
+            set_auto_open_config(group_id, 'auto_open_days', '')
+            set_auto_open_config(group_id, 'auto_open_time', '')
+            set_auto_open_config(group_id, 'zero_play_open_days', '')
+            set_auto_open_config(group_id, 'zero_play_open_time', '')
+            set_auto_open_config(group_id, 'auto_schedule_days', '')
+            set_auto_open_config(group_id, 'auto_schedule_time', '')
+
+        def reset_config_test():
+            cur = get_cursor()
+            if cur:
+                cur.execute("DELETE FROM config WHERE group_id='default' AND key='signup_limit'")
+                cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'signup_limit', '10') ON CONFLICT DO NOTHING")
+                cur.execute("DELETE FROM config WHERE group_id='default' AND key='event_duration'")
+                cur.execute("INSERT INTO config (group_id, key, value) VALUES ('default', 'event_duration', '30') ON CONFLICT DO NOTHING")
+
+        # Phase 3A - 自動開團設定
+        clear_group_data(group_id)
+        reset_config_test()
+        set_auto_open_config_test()
+        auto_days = get_auto_open_config(group_id, 'auto_open_days')
+        auto_time = get_auto_open_config(group_id, 'auto_open_time')
+        zero_days = get_zero_play_open_config(group_id, 'zero_play_open_days')
+        zero_time = get_zero_play_open_config(group_id, 'zero_play_open_time')
+        check("設定自動開團日", auto_days == '3', f"{auto_days}=3 正確")
+        check("設定自動開團時間", auto_time == '20:00', f"{auto_time}=20:00 正確")
+        check("設定零打日", zero_days == '4', f"{zero_days}=4 正確")
+        check("設定零打時間", zero_time == '11:30', f"{zero_time}=11:30 正確")
+
+        # Phase 3B - 自動開團流程
+        clear_group_data(group_id)
+        reset_config_test()
+        set_auto_open_config_test()
+        set_auto_trigger_date(group_id, 'auto_open_triggered_date')
+        coach_open_event(ADMIN_ID, group_id, "系統", auto_opened=True)
+        is_auto = is_event_auto_opened(group_id)
+        check("自動開團", is_auto, f"auto_opened={is_auto} 正確")
+
+        add_yearly_member(TEST_A, group_id, NAME_A)
+        is_yearly_a = is_yearly_member(TEST_A, group_id)
+        check("年繳會員設定", is_yearly_a, f"is_yearly={is_yearly_a} 正確")
+
+        atomic_signup(TEST_A, group_id, NAME_A)
+        add_count(TEST_A, group_id, 1, NAME_A)
+        should_allow_yearly = should_allow_signup(TEST_A, group_id)
+        check("年繳會員應可報名", should_allow_yearly == True, f"{should_allow_yearly} 正確")
+
+        should_allow_non_yearly = should_allow_signup(TEST_B, group_id)
+        check("非年繳會員應被拒", should_allow_non_yearly == False, f"{should_allow_non_yearly} 正確")
+
+        set_zero_play_open_triggered(group_id, True)
+        zero_triggered = get_zero_play_open_triggered(group_id)
+        check("零打觸發", zero_triggered, f"zero_triggered={zero_triggered} 正確")
+
+        should_allow_after_zero = should_allow_signup(TEST_B, group_id)
+        check("零打後應開放", should_allow_after_zero == True, f"{should_allow_after_zero} 正確")
+
+        # Phase 3C - 報名人數上限
+        clear_group_data(group_id)
+        reset_config_test()
+        new_limit = 3
+        cur = get_cursor()
+        if cur:
+            cur.execute("DELETE FROM config WHERE group_id=%s AND key='signup_limit'", (group_id,))
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'signup_limit', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(new_limit), str(new_limit)))
+        limit = get_signup_limit(group_id)
+        check("設定報名上限", limit == new_limit, f"limit={limit} 正確")
+
+        coach_open_event(TEST_A, group_id, NAME_A)
+        add_yearly_member(TEST_B, group_id, NAME_B)
+        atomic_signup(TEST_B, group_id, NAME_B)
+        add_count(TEST_B, group_id, 1, NAME_B)
+        total = get_total_count(group_id)
+        check("2人報名", total == 2, f"total={total} 正確")
+
+        atomic_signup(TEST_C, group_id, NAME_C)
+        add_count(TEST_C, group_id, 1, NAME_C)
+        total = get_total_count(group_id)
+        check("3人達上限", total == 3, f"total={total} 正確")
+
+        # Phase 3D - 活動過期
+        clear_group_data(group_id)
+        reset_config_test()
+        coach_open_event(TEST_A, group_id, NAME_A)
+        cur = get_cursor()
+        if cur:
+            cur.execute("UPDATE events SET expires_at = 0 WHERE group_id=%s", (group_id,))
+        is_active = is_event_active(group_id)
+        check("活動過期", not is_active, f"is_active={is_active} 正確")
+
+        # Phase 3E - 單價設定
+        clear_group_data(group_id)
+        reset_config_test()
+        test_price = 70
+        cur = get_cursor()
+        if cur:
+            cur.execute("INSERT INTO config (group_id, key, value) VALUES (%s, 'price', %s) ON CONFLICT (group_id, key) DO UPDATE SET value = %s", (group_id, str(test_price), str(test_price)))
+        price_after_set = get_price(group_id)
+        check("設定單價", price_after_set == test_price, f"price={price_after_set} 正確")
+
+        price_keep = get_price(group_id)
+        check("不設保持", price_keep == test_price, f"price={price_keep} 正確")
+
+        clear_group_data(group_id)
+        reset_config_test()
+        price_default = get_price(group_id)
+        check("新群組預設", price_default == 60, f"price={price_default} 正確")
 
     finally:
         # ── 清除測試資料 ──────────────────────────────────
         clear_group_data(group_id)
+        clear_auto_open_config()
+        reset_config_test()
 
     # ── 組合報告 ──────────────────────────────────────────
     total_tests = passed + failed
@@ -1370,10 +1496,6 @@ def run_bot_test(group_id, reply_token, price):
     msg += "\n🧹 測試資料已清除"
 
     line_bot_api.reply_message(reply_token, TextSendMessage(text=msg))
-
-
-
-def run_open_group_test(group_id, reply_token):
     TEST_A = "TEST_USER_A"
     TEST_B = "TEST_USER_B"
     TEST_C = "TEST_USER_C"
