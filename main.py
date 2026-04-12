@@ -873,14 +873,15 @@ def run_auto_schedule():
             if list_msg:
                 print(f"[SCHEDULE] Sending list message to {group_id[:8]}...")
                 line_bot_api.push_message(group_id, TextSendMessage(text=list_msg))
+                print(f"[SCHEDULE] List message sent OK to {group_id[:8]}...")
             time.sleep(0.5)
             auto_end_event(group_id)
             set_auto_trigger_date(group_id, 'auto_schedule_triggered_date')
             line_bot_api.push_message(group_id, TextSendMessage(text="✅ 活动已结束（自动排程）"))
-            print(f"[SCHEDULE] Event ended for {group_id[:8]}...")
+            print(f"[SCHEDULE] End message sent OK to {group_id[:8]}...")
             time.sleep(0.5)
         except Exception as e:
-            print(f"[SCHEDULE] Error for {group_id[:8]}...: {e}")
+            print(f"[SCHEDULE] Error for {group_id[:8]}...: {type(e).__name__}: {e}")
 
 def atomic_signup(user_id, group_id, name=""):
     cur = get_cursor()
@@ -994,8 +995,9 @@ def run_auto_open():
             set_auto_trigger_date(group_id, 'auto_open_triggered_date')
             print(f"[AUTO_OPEN] Event opened, count: {count}")
             line_bot_api.push_message(group_id, TextSendMessage(text=f"🏀 活動已自動開啟（系統），報名成功，累計人數 {count} 人"))
+            print(f"[AUTO_OPEN] Push message sent OK to {group_id[:8]}...")
         except Exception as e:
-            print(f"[AUTO_OPEN] Error: {e}")
+            print(f"[AUTO_OPEN] Push failed for {group_id[:8]}...: {type(e).__name__}: {e}")
 
 def check_and_trigger_zero_play():
     taiwan_tz = timezone(timedelta(hours=8))
@@ -1058,8 +1060,9 @@ def check_and_trigger_zero_play():
                 print(f"[ZERO_PLAY] Triggering zero play open for {group_id[:8]}...")
                 try:
                     line_bot_api.push_message(group_id, TextSendMessage(text="🎉 零打報名+1！現在所有人都可以報名了！"))
+                    print(f"[ZERO_PLAY] Push message sent OK to {group_id[:8]}...")
                 except Exception as e:
-                    print(f"[ZERO_PLAY] Push message error: {e}")
+                    print(f"[ZERO_PLAY] Push failed for {group_id[:8]}...: {type(e).__name__}: {e}")
         except Exception as e:
             print(f"[ZERO_PLAY] Error for {group_id[:8]}...: {e}")
 
