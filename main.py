@@ -2277,6 +2277,17 @@ def handle_message(event):
         line_bot_api.reply_message(reply_token, TextSendMessage(text=f"✅ 已移除全部 {count} 位年繳會員"))
         return
 
+    if text == "開團設定關閉" and user_id == ADMIN_ID:
+        set_auto_open_config(group_id, 'auto_open_days', '')
+        set_auto_open_config(group_id, 'auto_open_time', '')
+        set_zero_play_open_config(group_id, 'zero_play_open_days', '')
+        set_zero_play_open_config(group_id, 'zero_play_open_time', '')
+        set_zero_play_open_triggered(group_id, False)
+        set_schedule_config(group_id, 'schedule_days', '')
+        set_schedule_config(group_id, 'schedule_time', '')
+        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 開團設定已關閉"))
+        return
+
     if text == "開團設定查看" and user_id == ADMIN_ID:
         auto_days = get_auto_open_config(group_id, 'auto_open_days')
         auto_time = get_auto_open_config(group_id, 'auto_open_time')
@@ -2423,17 +2434,6 @@ def handle_message(event):
                 line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12] [60]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限 可選：單價）"))
         except:
             line_bot_api.reply_message(reply_token, TextSendMessage(text="❌ 格式錯誤，請輸入：開團設定 3 20:00 4 11:30 4 23:00 [12] [60]\n（開團日 開團時間 零打日 零打時間 排程日 排程時間 可選：報名人數上限 可選：單價）"))
-        return
-
-    if text == "開團設定關閉" and user_id == ADMIN_ID:
-        set_auto_open_config(group_id, 'auto_open_days', '')
-        set_auto_open_config(group_id, 'auto_open_time', '')
-        set_zero_play_open_config(group_id, 'zero_play_open_days', '')
-        set_zero_play_open_config(group_id, 'zero_play_open_time', '')
-        set_zero_play_open_triggered(group_id, False)
-        set_schedule_config(group_id, 'schedule_days', '')
-        set_schedule_config(group_id, 'schedule_time', '')
-        line_bot_api.reply_message(reply_token, TextSendMessage(text="✅ 開團設定已關閉"))
         return
 
     if text == "測試" and user_id == ADMIN_ID:
