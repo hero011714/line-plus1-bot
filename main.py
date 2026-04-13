@@ -667,6 +667,12 @@ def should_auto_open(group_id):
             if current_hour == target_hour and target_minute <= current_minute <= window_end:
                 in_window = True
         
+        if not in_window:
+            if current_hour > target_hour or (current_hour == target_hour and current_minute > target_minute):
+                if current_hour < target_hour + 2:
+                    in_window = True
+                    print(f"[AUTO_OPEN] catch-up: time passed but within 2 hours")
+        
         print(f"[AUTO_OPEN] in_window: {in_window}")
         return in_window
     except:
@@ -779,6 +785,11 @@ def should_auto_schedule(group_id):
         else:
             if current_hour == target_hour and target_minute <= current_minute <= window_end:
                 in_window = True
+        
+        if not in_window:
+            if current_hour > target_hour or (current_hour == target_hour and current_minute > target_minute):
+                if current_hour < target_hour + 2:
+                    in_window = True
         
         return in_window
     except:
@@ -1056,6 +1067,12 @@ def check_and_trigger_zero_play():
             else:
                 if current_hour == target_hour and target_minute <= current_minute <= window_end:
                     in_window = True
+            
+            if not in_window:
+                if current_hour > target_hour or (current_hour == target_hour and current_minute > target_minute):
+                    if current_hour < target_hour + 2:
+                        in_window = True
+                        print(f"[ZERO_PLAY] catch-up: time passed but within 2 hours")
             
             print(f"[ZERO_PLAY] {group_id[:8]}... in_window: {in_window}")
             if in_window:
