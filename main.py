@@ -882,14 +882,13 @@ def run_auto_schedule():
             print(f"[SCHEDULE] Triggering for {group_id[:8]}...")
             list_msg = build_list_message(group_id)
             if list_msg:
+                end_msg = list_msg + "\n\n✅ 活动已结束（自动排程）"
                 print(f"[SCHEDULE] Sending list message to {group_id[:8]}...")
-                line_bot_api.push_message(group_id, TextSendMessage(text=list_msg))
+                line_bot_api.push_message(group_id, TextSendMessage(text=end_msg))
                 print(f"[SCHEDULE] List message sent OK to {group_id[:8]}...")
             time.sleep(0.5)
             auto_end_event(group_id)
             set_auto_trigger_date(group_id, 'auto_schedule_triggered_date')
-            line_bot_api.push_message(group_id, TextSendMessage(text="✅ 活动已结束（自动排程）"))
-            print(f"[SCHEDULE] End message sent OK to {group_id[:8]}...")
             time.sleep(0.5)
         except Exception as e:
             print(f"[SCHEDULE] Error for {group_id[:8]}...: {type(e).__name__}: {e}")
