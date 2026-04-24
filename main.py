@@ -2182,7 +2182,7 @@ def handle_message(event):
                         pass
             if not display_name:
                 display_name = uid[-4:]
-            cur.execute("SELECT value FROM config WHERE group_id='default' AND key='price'")
+            cur.execute("SELECT value FROM config WHERE group_id=%s AND key='price'", (gid,))
             price_row = cur.fetchone()
             group_price = int(price_row[0]) if price_row else 50
             # For ID fragments (4 chars or less), don't add @ prefix
